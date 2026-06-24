@@ -1,0 +1,14 @@
+{
+  "name": "lan-transfer-panel",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "中文局域网文件传输面板，代理 rclone RC 和 aria2 RPC。",
+  "scripts": {
+    "start": "node server.js",
+    "dev": "PANEL_BIND=127.0.0.1,10.42.0.1 PANEL_PORT=5590 node server.js"
+  },
+  "engines": {
+    "node": ">=20"
+  }
+}
