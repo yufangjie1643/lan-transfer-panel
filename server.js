@@ -360,6 +360,11 @@ async function handleApi(req, res, requestUrl) {
     return;
   }
 
+  if (endpoint === '/api/download-folder' && req.method === 'GET') {
+    await handleDownloadFolder(req, res, requestUrl);
+    return;
+  }
+
   if (endpoint === '/api/upload' && req.method === 'PUT') {
     await handleUpload(req, res, requestUrl);
     return;
@@ -754,6 +759,66 @@ async function handleDownload(req, res, requestUrl) {
   child.on('error', (error) => res.destroy(error));
 }
 
+async function handleDownloadFolder(req, res, requestUrl) {
+  const remote = assertRemote(requestUrl.searchParams.get('remote'));
+  const remotePath = normalizeRemotePath(requestUrl.searchParams.get('path') || '');
+  if (!remotePath) throw Object.assign(new Error('缺少文件夹路径'), { statusCode: 400 });
+
+  const stat = await rcloneRc('operations/stat', {
+    fs: `${remote}:`,
+    remote: remotePath,
+    opt: { dirsOnly: true },
+  });
+  if (!stat.item || !stat.item.IsDir) {
+    throw Object.assign(new Error('只能打包下载文件夹'), { statusCode: 400 });
+  }
+
+  const folderName = safeArchiveBaseName(stat.item.Name || path.posix.basename(remotePath));
+  const tempRoot = await fsp.mkdtemp(path.join(os.tmpdir(), 'lan-transfer-folder-'));
+  const folderRoot = path.join(tempRoot, folderName);
+  const archivePath = path.join(tempRoot, `${folderName}.tar.gz`);
+  let handoffToResponse = false;
+
+  try {
+    await fsp.mkdir(folderRoot, { recursive: true });
+    await runCommand('rclone', ['copy', `${remote}:${remotePath}`, folderRoot]);
+    await runCommand('tar', [
+      '-C',
+      tempRoot,
+      '--use-compress-program=gzip -1',
+      '-cf',
+      archivePath,
+      '--',
+      folderName,
+    ]);
+
+    const archiveStat = await fsp.stat(archivePath);
+    const filename = encodeURIComponent(`${folderName}.tar.gz`);
+    res.writeHead(200, {
+      'Content-Type': 'application/gzip',
+      'Content-Length': archiveStat.size,
+      'Content-Disposition': `attachment; filename*=UTF-8''${filename}`,
+      'Cache-Control': 'no-store',
+    });
+
+    handoffToResponse = true;
+    const cleanup = once(() => {
+      fsp.rm(tempRoot, { recursive: true, force: true }).catch((error) => {
+        console.error(`cleanup archive temp: ${error.message}`);
+      });
+    });
+    const stream = fs.createReadStream(archivePath);
+    stream.on('error', (error) => res.destroy(error));
+    res.on('close', cleanup);
+    stream.pipe(res);
+  } catch (error) {
+    if (!handoffToResponse) {
+      await fsp.rm(tempRoot, { recursive: true, force: true }).catch(() => {});
+    }
+    throw error;
+  }
+}
+
 async function handleUpload(req, res, requestUrl) {
   const remote = assertRemote(requestUrl.searchParams.get('remote'));
   const parentPath = normalizeRemotePath(requestUrl.searchParams.get('path') || '');
@@ -868,6 +933,24 @@ function assertGid(value) {
     throw Object.assign(new Error('任务编号不合法'), { statusCode: 400 });
   }
   return gid;
+}
+
+function safeArchiveBaseName(value) {
+  const cleaned = String(value || 'folder')
+    .replace(/[\\/:"*?<>|\x00-\x1f]/g, '_')
+    .replace(/^\.+$/, 'folder')
+    .trim()
+    .slice(0, 96);
+  return cleaned || 'folder';
+}
+
+function once(fn) {
+  let called = false;
+  return (...args) => {
+    if (called) return undefined;
+    called = true;
+    return fn(...args);
+  };
 }
 
 function joinRemotePath(parentPath, name) {

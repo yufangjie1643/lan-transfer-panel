@@ -57,70 +57,78 @@
             <nav id="remoteList" class="remote-list"></nav>
           </section>
 
-          <section class="panel">
-            <div class="panel-title">
-              <h2>新建下载</h2>
+          <section class="panel side-pages">
+            <div class="side-tabs" role="tablist" aria-label="侧栏分页">
+              <button class="side-tab active" type="button" data-side-page="downloads">下载</button>
+              <button class="side-tab" type="button" data-side-page="send">发送</button>
+              <button class="side-tab" type="button" data-side-page="overview">概览</button>
             </div>
-            <form id="downloadForm" class="download-form">
-              <textarea id="downloadUrl" rows="4" placeholder="粘贴 http、https、ftp 或 magnet 链接"></textarea>
-              <button type="submit">加入队列</button>
-            </form>
-          </section>
 
-          <section class="panel">
-            <div class="panel-title">
-              <h2>发送规则</h2>
+            <div class="side-page active" data-side-content="downloads">
+              <div class="panel-title">
+                <h2>新建下载</h2>
+              </div>
+              <form id="downloadForm" class="download-form">
+                <textarea id="downloadUrl" rows="4" placeholder="粘贴 http、https、ftp 或 magnet 链接"></textarea>
+                <button type="submit">加入队列</button>
+              </form>
             </div>
-            <form id="sendSettingsForm" class="send-settings">
-              <label>
-                <span>大文件阈值</span>
-                <input id="sendThresholdGb" type="number" min="0.01" step="0.01" value="1">
-              </label>
-              <label>
-                <span>本机访问地址</span>
-                <input id="sendPublicHost" value="10.42.0.1">
-              </label>
-              <label>
-                <span>远端接收地址</span>
-                <input id="peerReceiverUrl" placeholder="http://10.42.0.2:6800/...">
-              </label>
-              <label>
-                <span>访问口令</span>
-                <input id="peerReceiverToken" type="password" placeholder="接收端口令">
-              </label>
-              <label>
-                <span>远端保存目录</span>
-                <input id="peerDir" placeholder="/path/to/downloads">
-              </label>
-              <label>
-                <span>小文件处理</span>
-                <select id="smallMethod">
-                  <option value="none">手动确认</option>
-                  <option value="copy">直连复制</option>
-                  <option value="sync">同步发送</option>
-                </select>
-              </label>
-              <label>
-                <span>复制目标</span>
-                <input id="copyTarget" placeholder="peer:/target/dir">
-              </label>
-              <label>
-                <span>同步目标</span>
-                <input id="syncTarget" placeholder="user@10.42.0.2:/target/dir/">
-              </label>
-              <button type="submit" class="secondary-button">保存策略</button>
-            </form>
-          </section>
 
-          <section class="panel">
-            <div class="panel-title">
-              <h2>传输概览</h2>
+            <div class="side-page" data-side-content="send" hidden>
+              <div class="panel-title">
+                <h2>发送规则</h2>
+              </div>
+              <form id="sendSettingsForm" class="send-settings">
+                <label>
+                  <span>大文件阈值</span>
+                  <input id="sendThresholdGb" type="number" min="0.01" step="0.01" value="1">
+                </label>
+                <label>
+                  <span>本机访问地址</span>
+                  <input id="sendPublicHost" value="10.42.0.1">
+                </label>
+                <label>
+                  <span>远端接收地址</span>
+                  <input id="peerReceiverUrl" placeholder="http://10.42.0.2:6800/...">
+                </label>
+                <label>
+                  <span>访问口令</span>
+                  <input id="peerReceiverToken" type="password" placeholder="接收端口令">
+                </label>
+                <label>
+                  <span>远端保存目录</span>
+                  <input id="peerDir" placeholder="/path/to/downloads">
+                </label>
+                <label>
+                  <span>小文件处理</span>
+                  <select id="smallMethod">
+                    <option value="none">手动确认</option>
+                    <option value="copy">直连复制</option>
+                    <option value="sync">同步发送</option>
+                  </select>
+                </label>
+                <label>
+                  <span>复制目标</span>
+                  <input id="copyTarget" placeholder="peer:/target/dir">
+                </label>
+                <label>
+                  <span>同步目标</span>
+                  <input id="syncTarget" placeholder="user@10.42.0.2:/target/dir/">
+                </label>
+                <button type="submit" class="secondary-button">保存策略</button>
+              </form>
             </div>
-            <dl class="metrics">
-              <div><dt>文件传输</dt><dd id="transferSpeed">0 B/s</dd></div>
-              <div><dt>下载速度</dt><dd id="downloadSpeed">0 B/s</dd></div>
-              <div><dt>队列任务</dt><dd id="activeCount">0</dd></div>
-            </dl>
+
+            <div class="side-page" data-side-content="overview" hidden>
+              <div class="panel-title">
+                <h2>传输概览</h2>
+              </div>
+              <dl class="metrics">
+                <div><dt>文件传输</dt><dd id="transferSpeed">0 B/s</dd></div>
+                <div><dt>下载速度</dt><dd id="downloadSpeed">0 B/s</dd></div>
+                <div><dt>队列任务</dt><dd id="activeCount">0</dd></div>
+              </dl>
+            </div>
           </section>
         </aside>
 

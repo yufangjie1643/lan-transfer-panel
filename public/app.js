@@ -183,6 +183,14 @@ for (const button of $$('.sort-button')) {
   });
 }
 
+for (const tab of $$('.side-tab')) {
+  tab.addEventListener('click', () => {
+    setSidePage(tab.dataset.sidePage);
+  });
+}
+
+setSidePage(localStorage.getItem('lanTransferPanel.sidePage') || 'downloads');
+
 async function boot() {
   await api('/api/session');
   loginView.hidden = true;
@@ -384,6 +392,12 @@ function renderFiles() {
       downloadLink.href = `/api/download?${new URLSearchParams({ remote: state.remote, path: item.Path })}`;
       downloadLink.textContent = '下载';
       actionCell.append(downloadLink);
+    } else {
+      const archiveLink = document.createElement('a');
+      archiveLink.className = 'action-link primary-action';
+      archiveLink.href = `/api/download-folder?${new URLSearchParams({ remote: state.remote, path: item.Path })}`;
+      archiveLink.textContent = '打包下载';
+      actionCell.append(archiveLink);
     }
     const deleteButton = document.createElement('button');
     deleteButton.type = 'button';
@@ -674,6 +688,19 @@ function showMessage(text, isError = false) {
   showMessage.timer = window.setTimeout(() => {
     message.hidden = true;
   }, 4200);
+}
+
+function setSidePage(page) {
+  const nextPage = ['downloads', 'send', 'overview'].includes(page) ? page : 'downloads';
+  for (const tab of $$('.side-tab')) {
+    tab.classList.toggle('active', tab.dataset.sidePage === nextPage);
+  }
+  for (const content of $$('[data-side-content]')) {
+    const active = content.dataset.sideContent === nextPage;
+    content.classList.toggle('active', active);
+    content.hidden = !active;
+  }
+  localStorage.setItem('lanTransferPanel.sidePage', nextPage);
 }
 
 function loadLocationState() {

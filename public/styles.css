@@ -292,6 +292,39 @@ select:focus {
   padding: 14px;
 }
 
+.side-pages {
+  display: grid;
+  gap: 14px;
+}
+
+.side-tabs {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 4px;
+  padding: 4px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: var(--surface-soft);
+}
+
+.side-tab {
+  min-height: 34px;
+  border-radius: 7px;
+  background: transparent;
+  color: var(--muted);
+  font-weight: 900;
+}
+
+.side-tab.active {
+  background: #fff;
+  color: var(--primary-strong);
+  box-shadow: var(--shadow-sm);
+}
+
+.side-page {
+  min-width: 0;
+}
+
 .panel-title {
   display: flex;
   align-items: center;
