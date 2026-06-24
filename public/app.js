@@ -1,14 +1,25 @@
+const savedLocation = loadLocationState();
+const savedSort = loadSortState();
+
 const state = {
   remotes: [],
-  remote: 'data',
-  path: '',
+  remote: savedLocation.remote || 'data',
+  path: savedLocation.path || '',
   files: [],
+  fileFilter: '',
+  fileSortKey: savedSort.key,
+  fileSortDir: savedSort.dir,
+  filesRequestId: 0,
+  tasksRequestId: 0,
+  filesLoading: false,
+  filesError: '',
   sendSettings: loadSendSettings(),
   tasksTimer: null,
   statsTimer: null,
 };
 
 const $ = (selector) => document.querySelector(selector);
+const $$ = (selector) => [...document.querySelectorAll(selector)];
 
 const loginView = $('#loginView');
 const appView = $('#appView');
@@ -22,11 +33,16 @@ const pathHint = $('#pathHint');
 const message = $('#message');
 const taskRows = $('#taskRows');
 const statusBadge = $('#statusBadge');
+const fileFilter = $('#fileFilter');
+const loginButton = loginForm.querySelector('button[type="submit"]');
+const downloadButton = $('#downloadForm button[type="submit"]');
+const saveSendSettingsButton = $('#sendSettingsForm button[type="submit"]');
 
 loginForm.addEventListener('submit', async (event) => {
   event.preventDefault();
   loginError.hidden = true;
   const form = new FormData(loginForm);
+  setButtonBusy(loginButton, true, '登录中');
   try {
     await api('/api/login', {
       method: 'POST',
@@ -40,6 +56,8 @@ loginForm.addEventListener('submit', async (event) => {
   } catch (error) {
     loginError.textContent = error.message;
     loginError.hidden = false;
+  } finally {
+    setButtonBusy(loginButton, false);
   }
 });
 
@@ -50,16 +68,25 @@ $('#logoutBtn').addEventListener('click', async () => {
   loginView.hidden = false;
 });
 
-$('#reloadRemotesBtn').addEventListener('click', loadRemotes);
-$('#refreshFilesBtn').addEventListener('click', loadFiles);
-$('#refreshTasksBtn').addEventListener('click', loadTasks);
+$('#reloadRemotesBtn').addEventListener('click', (event) => {
+  runButtonAction(event.currentTarget, '刷新中', loadRemotes);
+});
+$('#refreshFilesBtn').addEventListener('click', (event) => {
+  runButtonAction(event.currentTarget, '刷新中', loadFiles);
+});
+$('#refreshTasksBtn').addEventListener('click', (event) => {
+  runButtonAction(event.currentTarget, '刷新中', loadTasks);
+});
 $('#refreshAllBtn').addEventListener('click', async () => {
-  await Promise.allSettled([loadRemotes(), loadFiles(), loadTasks(), loadStats()]);
+  await runButtonAction($('#refreshAllBtn'), '刷新中', async () => {
+    await Promise.allSettled([loadRemotes(), loadFiles(), loadTasks(), loadStats()]);
+  });
 });
 
-$('#mkdirBtn').addEventListener('click', async () => {
+$('#mkdirBtn').addEventListener('click', async (event) => {
   const name = window.prompt('文件夹名称');
   if (!name) return;
+  setButtonBusy(event.currentTarget, true, '创建中');
   try {
     await api('/api/mkdir', {
       method: 'POST',
@@ -69,6 +96,8 @@ $('#mkdirBtn').addEventListener('click', async () => {
     await loadFiles();
   } catch (error) {
     showMessage(error.message, true);
+  } finally {
+    setButtonBusy(event.currentTarget, false);
   }
 });
 
@@ -77,6 +106,7 @@ $('#uploadBtn').addEventListener('click', () => $('#fileInput').click());
 $('#fileInput').addEventListener('change', async (event) => {
   const files = [...event.target.files];
   if (!files.length) return;
+  setButtonBusy($('#uploadBtn'), true, '上传中');
   for (const file of files) {
     try {
       showMessage(`正在上传：${file.name}`);
@@ -89,15 +119,18 @@ $('#fileInput').addEventListener('change', async (event) => {
         method: 'PUT',
         body: file,
       });
+      if (response.status === 401) handleUnauthorized();
       const data = await response.json().catch(() => ({}));
       if (!response.ok) throw new Error(data.error || `上传失败：${file.name}`);
     } catch (error) {
       showMessage(error.message, true);
       event.target.value = '';
+      setButtonBusy($('#uploadBtn'), false);
       return;
     }
   }
   event.target.value = '';
+  setButtonBusy($('#uploadBtn'), false);
   showMessage(`上传完成：${files.length} 个文件`);
   await loadFiles();
 });
@@ -106,6 +139,7 @@ $('#downloadForm').addEventListener('submit', async (event) => {
   event.preventDefault();
   const url = $('#downloadUrl').value.trim();
   if (!url) return;
+  setButtonBusy(downloadButton, true, '添加中');
   try {
     const result = await api('/api/aria2/add', {
       method: 'POST',
@@ -117,15 +151,38 @@ $('#downloadForm').addEventListener('submit', async (event) => {
     if (state.remote === 'aria2') await loadFiles();
   } catch (error) {
     showMessage(error.message, true);
+  } finally {
+    setButtonBusy(downloadButton, false);
   }
 });
 
 $('#sendSettingsForm').addEventListener('submit', (event) => {
   event.preventDefault();
+  setButtonBusy(saveSendSettingsButton, true, '已保存');
   state.sendSettings = readSendSettings();
   localStorage.setItem('lanTransferPanel.sendSettings', JSON.stringify(state.sendSettings));
   showMessage('发送策略已保存');
+  window.setTimeout(() => setButtonBusy(saveSendSettingsButton, false), 500);
 });
+
+fileFilter.addEventListener('input', () => {
+  state.fileFilter = fileFilter.value.trim().toLowerCase();
+  renderFiles();
+});
+
+fileFilter.addEventListener('keydown', (event) => {
+  if (event.key === 'Escape' && fileFilter.value) {
+    fileFilter.value = '';
+    state.fileFilter = '';
+    renderFiles();
+  }
+});
+
+for (const button of $$('.sort-button')) {
+  button.addEventListener('click', () => {
+    setFileSort(button.dataset.sort);
+  });
+}
 
 async function boot() {
   await api('/api/session');
@@ -134,7 +191,8 @@ async function boot() {
   fillSendSettings();
   await loadRemotes();
   if (!state.remotes.includes(state.remote)) state.remote = state.remotes[0] || 'home';
-  state.path = '';
+  if (!savedLocation.remote || !state.remotes.includes(savedLocation.remote)) state.path = '';
+  saveLocationState();
   await Promise.allSettled([loadFiles(), loadTasks(), loadStats()]);
   stopTimers();
   state.tasksTimer = setInterval(loadTasks, 5000);
@@ -142,24 +200,56 @@ async function boot() {
 }
 
 async function loadRemotes() {
-  const data = await api('/api/remotes');
-  state.remotes = data.remotes || [];
-  renderRemotes();
+  try {
+    const data = await api('/api/remotes');
+    state.remotes = data.remotes || [];
+    renderRemotes();
+  } catch (error) {
+    showMessage(error.message, true);
+    setStatus('连接异常');
+  }
 }
 
 async function loadFiles() {
+  const requestId = ++state.filesRequestId;
+  state.filesLoading = true;
+  state.filesError = '';
+  renderFiles();
   setStatus('加载中');
   const params = new URLSearchParams({ remote: state.remote, path: state.path });
-  const data = await api(`/api/list?${params}`);
-  state.files = data.list || [];
-  renderBreadcrumb();
-  renderFiles();
-  setStatus('已连接');
+  try {
+    const data = await api(`/api/list?${params}`);
+    if (requestId !== state.filesRequestId) return;
+    state.files = data.list || [];
+    renderBreadcrumb();
+    renderFiles();
+    setStatus('已连接');
+  } catch (error) {
+    if (requestId !== state.filesRequestId) return;
+    state.files = [];
+    state.filesError = error.message;
+    renderBreadcrumb();
+    renderFiles();
+    showMessage(error.message, true);
+    setStatus('连接异常');
+  } finally {
+    if (requestId === state.filesRequestId) {
+      state.filesLoading = false;
+      renderFiles();
+    }
+  }
 }
 
 async function loadTasks() {
-  const data = await api('/api/aria2/tasks');
-  renderTasks(data);
+  const requestId = ++state.tasksRequestId;
+  try {
+    const data = await api('/api/aria2/tasks');
+    if (requestId !== state.tasksRequestId) return;
+    renderTasks(data);
+  } catch (error) {
+    if (requestId !== state.tasksRequestId) return;
+    renderTasksError(error.message);
+  }
 }
 
 async function loadStats() {
@@ -180,14 +270,24 @@ async function loadStats() {
 
 function renderRemotes() {
   remoteList.innerHTML = '';
+  if (!state.remotes.length) {
+    const empty = document.createElement('p');
+    empty.className = 'remote-empty';
+    empty.textContent = '暂无可用位置';
+    remoteList.append(empty);
+    return;
+  }
+
   for (const remote of state.remotes) {
     const button = document.createElement('button');
     button.type = 'button';
     button.className = remote === state.remote ? 'remote-item active' : 'remote-item';
     button.textContent = `${remote}:`;
     button.addEventListener('click', async () => {
+      if (remote === state.remote && !state.path) return;
       state.remote = remote;
       state.path = '';
+      saveLocationState();
       renderRemotes();
       await loadFiles();
     });
@@ -211,10 +311,11 @@ function renderBreadcrumb() {
     breadcrumb.append(separator);
 
     current = current ? `${current}/${part}` : part;
+    const targetPath = current;
     const button = document.createElement('button');
     button.type = 'button';
     button.textContent = part;
-    button.addEventListener('click', () => navigateTo(current));
+    button.addEventListener('click', () => navigateTo(targetPath));
     breadcrumb.append(button);
   }
 
@@ -223,15 +324,37 @@ function renderBreadcrumb() {
 
 function renderFiles() {
   fileRows.innerHTML = '';
-  emptyState.hidden = state.files.length > 0;
+  renderSortIndicators();
 
-  for (const item of state.files) {
+  if (state.filesLoading && !state.files.length) {
+    emptyState.textContent = '正在加载文件...';
+    emptyState.hidden = false;
+    return;
+  }
+
+  if (state.filesError) {
+    emptyState.textContent = `加载失败：${state.filesError}`;
+    emptyState.hidden = false;
+    return;
+  }
+
+  const files = filteredAndSortedFiles();
+  if (!files.length) {
+    emptyState.textContent = state.fileFilter ? '没有匹配的文件' : '这个目录是空的';
+    emptyState.hidden = false;
+    return;
+  }
+
+  emptyState.hidden = true;
+
+  for (const item of files) {
     const row = document.createElement('tr');
     const nameCell = document.createElement('td');
     const nameButton = document.createElement('button');
     nameButton.type = 'button';
     nameButton.className = item.IsDir ? 'file-name folder' : 'file-name';
-    nameButton.textContent = item.IsDir ? `[目录] ${item.Name}` : item.Name;
+    nameButton.title = item.Name;
+    nameButton.textContent = item.IsDir ? `目录 ${item.Name}` : item.Name;
     nameButton.addEventListener('click', () => {
       if (item.IsDir) navigateTo(item.Path);
     });
@@ -252,7 +375,7 @@ function renderFiles() {
       const sendButton = document.createElement('button');
       sendButton.type = 'button';
       sendButton.textContent = '发送';
-      sendButton.addEventListener('click', () => sendItem(item));
+      sendButton.addEventListener('click', (event) => sendItem(item, event.currentTarget));
       actionCell.append(sendButton);
 
       const downloadLink = document.createElement('a');
@@ -263,7 +386,7 @@ function renderFiles() {
     const deleteButton = document.createElement('button');
     deleteButton.type = 'button';
     deleteButton.textContent = item.IsDir ? '删除空目录' : '删除';
-    deleteButton.addEventListener('click', () => deleteItem(item));
+    deleteButton.addEventListener('click', (event) => deleteItem(item, event.currentTarget));
     actionCell.append(deleteButton);
 
     row.append(nameCell, sizeCell, timeCell, typeCell, actionCell);
@@ -271,7 +394,65 @@ function renderFiles() {
   }
 }
 
-async function sendItem(item) {
+function filteredAndSortedFiles() {
+  const filter = state.fileFilter;
+  const files = filter
+    ? state.files.filter((item) => fileSearchText(item).includes(filter))
+    : [...state.files];
+  const direction = state.fileSortDir === 'desc' ? -1 : 1;
+  files.sort((a, b) => {
+    if (a.IsDir !== b.IsDir) return a.IsDir ? -1 : 1;
+    return compareFileItems(a, b, state.fileSortKey) * direction;
+  });
+  return files;
+}
+
+function fileSearchText(item) {
+  return [item.Name, item.Path, item.IsDir ? '文件夹 目录 folder' : item.MimeType || '文件']
+    .filter(Boolean)
+    .join(' ')
+    .toLowerCase();
+}
+
+function compareFileItems(a, b, key) {
+  if (key === 'size') return Number(a.Size || 0) - Number(b.Size || 0);
+  if (key === 'time') return new Date(a.ModTime || 0).getTime() - new Date(b.ModTime || 0).getTime();
+  if (key === 'type') return fileTypeText(a).localeCompare(fileTypeText(b), 'zh-CN');
+  return String(a.Name || '').localeCompare(String(b.Name || ''), 'zh-CN', {
+    numeric: true,
+    sensitivity: 'base',
+  });
+}
+
+function fileTypeText(item) {
+  return item.IsDir ? '文件夹' : item.MimeType || '文件';
+}
+
+function setFileSort(key) {
+  if (state.fileSortKey === key) {
+    state.fileSortDir = state.fileSortDir === 'asc' ? 'desc' : 'asc';
+  } else {
+    state.fileSortKey = key;
+    state.fileSortDir = key === 'name' || key === 'type' ? 'asc' : 'desc';
+  }
+  localStorage.setItem(
+    'lanTransferPanel.fileSort',
+    JSON.stringify({ key: state.fileSortKey, dir: state.fileSortDir }),
+  );
+  renderFiles();
+}
+
+function renderSortIndicators() {
+  for (const indicator of $$('[data-sort-indicator]')) {
+    const key = indicator.dataset.sortIndicator;
+    indicator.textContent = key === state.fileSortKey ? (state.fileSortDir === 'asc' ? '↑' : '↓') : '';
+  }
+  for (const button of $$('.sort-button')) {
+    button.classList.toggle('active', button.dataset.sort === state.fileSortKey);
+  }
+}
+
+async function sendItem(item, button) {
   const settings = readSendSettings();
   state.sendSettings = settings;
   localStorage.setItem('lanTransferPanel.sendSettings', JSON.stringify(settings));
@@ -282,6 +463,7 @@ async function sendItem(item) {
   );
   if (!ok) return;
 
+  setButtonBusy(button, true, '发送中');
   try {
     const result = await api('/api/send', {
       method: 'POST',
@@ -309,6 +491,8 @@ async function sendItem(item) {
     }
   } catch (error) {
     showMessage(error.message, true);
+  } finally {
+    setButtonBusy(button, false);
   }
 }
 
@@ -355,11 +539,21 @@ function renderTasks(data) {
   }
 }
 
+function renderTasksError(text) {
+  taskRows.innerHTML = '';
+  const error = document.createElement('div');
+  error.className = 'empty-state inline error';
+  error.textContent = `任务加载失败：${text}`;
+  taskRows.append(error);
+}
+
 function taskButton(label, onClick) {
   const button = document.createElement('button');
   button.type = 'button';
   button.textContent = label;
-  button.addEventListener('click', onClick);
+  button.addEventListener('click', async () => {
+    await runButtonAction(button, '处理中', onClick);
+  });
   return button;
 }
 
@@ -375,9 +569,10 @@ async function controlTask(gid, action) {
   }
 }
 
-async function deleteItem(item) {
+async function deleteItem(item, button) {
   const ok = window.confirm(`确认删除 ${item.IsDir ? '空目录' : '文件'}：${item.Name}？`);
   if (!ok) return;
+  setButtonBusy(button, true, '删除中');
   try {
     await api('/api/delete', {
       method: 'POST',
@@ -387,11 +582,14 @@ async function deleteItem(item) {
     await loadFiles();
   } catch (error) {
     showMessage(error.message, true);
+  } finally {
+    setButtonBusy(button, false);
   }
 }
 
 async function navigateTo(nextPath) {
   state.path = nextPath || '';
+  saveLocationState();
   await loadFiles();
 }
 
@@ -404,14 +602,42 @@ async function api(url, options = {}) {
   });
 
   if (response.status === 401 && !options.skipAuthRedirect) {
-    stopTimers();
-    appView.hidden = true;
-    loginView.hidden = false;
+    handleUnauthorized();
   }
 
   const data = await response.json().catch(() => ({}));
   if (!response.ok) throw new Error(data.error || `请求失败：${response.status}`);
   return data;
+}
+
+function handleUnauthorized() {
+  stopTimers();
+  appView.hidden = true;
+  loginView.hidden = false;
+}
+
+async function runButtonAction(button, busyText, action) {
+  setButtonBusy(button, true, busyText);
+  try {
+    return await action();
+  } finally {
+    setButtonBusy(button, false);
+  }
+}
+
+function setButtonBusy(button, isBusy, busyText) {
+  if (!button) return;
+  if (isBusy) {
+    button.dataset.idleText = button.textContent;
+    button.disabled = true;
+    if (busyText) button.textContent = busyText;
+    return;
+  }
+  button.disabled = false;
+  if (button.dataset.idleText) {
+    button.textContent = button.dataset.idleText;
+    delete button.dataset.idleText;
+  }
 }
 
 function stopTimers() {
@@ -433,6 +659,36 @@ function showMessage(text, isError = false) {
   showMessage.timer = window.setTimeout(() => {
     message.hidden = true;
   }, 4200);
+}
+
+function loadLocationState() {
+  try {
+    const value = JSON.parse(localStorage.getItem('lanTransferPanel.location') || '{}');
+    return {
+      remote: typeof value.remote === 'string' ? value.remote : '',
+      path: typeof value.path === 'string' ? value.path : '',
+    };
+  } catch {
+    return { remote: '', path: '' };
+  }
+}
+
+function saveLocationState() {
+  localStorage.setItem(
+    'lanTransferPanel.location',
+    JSON.stringify({ remote: state.remote, path: state.path }),
+  );
+}
+
+function loadSortState() {
+  try {
+    const value = JSON.parse(localStorage.getItem('lanTransferPanel.fileSort') || '{}');
+    const key = ['name', 'size', 'time', 'type'].includes(value.key) ? value.key : 'name';
+    const dir = value.dir === 'desc' ? 'desc' : 'asc';
+    return { key, dir };
+  } catch {
+    return { key: 'name', dir: 'asc' };
+  }
 }
 
 function loadSendSettings() {

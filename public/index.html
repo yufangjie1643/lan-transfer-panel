@@ -125,6 +125,7 @@
               <p id="pathHint" class="path-hint"></p>
             </div>
             <div class="toolbar-actions">
+              <input id="fileFilter" class="file-filter" type="search" placeholder="筛选文件">
               <input id="fileInput" type="file" multiple hidden>
               <button id="uploadBtn" type="button">上传</button>
               <button id="mkdirBtn" type="button">新建文件夹</button>
@@ -138,10 +139,10 @@
             <table class="file-table">
               <thead>
                 <tr>
-                  <th>名称</th>
-                  <th>大小</th>
-                  <th>修改时间</th>
-                  <th>类型</th>
+                  <th><button class="sort-button" type="button" data-sort="name">名称 <span data-sort-indicator="name"></span></button></th>
+                  <th><button class="sort-button" type="button" data-sort="size">大小 <span data-sort-indicator="size"></span></button></th>
+                  <th><button class="sort-button" type="button" data-sort="time">修改时间 <span data-sort-indicator="time"></span></button></th>
+                  <th><button class="sort-button" type="button" data-sort="type">类型 <span data-sort-indicator="type"></span></button></th>
                   <th>操作</th>
                 </tr>
               </thead>
