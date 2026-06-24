@@ -141,14 +141,13 @@ $('#downloadForm').addEventListener('submit', async (event) => {
   if (!url) return;
   setButtonBusy(downloadButton, true, '添加中');
   try {
-    const result = await api('/api/aria2/add', {
+    const result = await api('/api/downloads/add', {
       method: 'POST',
       body: { url },
     });
     $('#downloadUrl').value = '';
-    showMessage(`aria2 任务已添加：${result.gid}`);
+    showMessage(`下载任务已加入：${result.gid}`);
     await loadTasks();
-    if (state.remote === 'aria2') await loadFiles();
   } catch (error) {
     showMessage(error.message, true);
   } finally {
@@ -243,7 +242,7 @@ async function loadFiles() {
 async function loadTasks() {
   const requestId = ++state.tasksRequestId;
   try {
-    const data = await api('/api/aria2/tasks');
+    const data = await api('/api/downloads/tasks');
     if (requestId !== state.tasksRequestId) return;
     renderTasks(data);
   } catch (error) {
@@ -253,18 +252,15 @@ async function loadTasks() {
 }
 
 async function loadStats() {
-  const [rclone, aria2] = await Promise.allSettled([
-    api('/api/rclone/stats'),
-    api('/api/aria2/tasks'),
-  ]);
-
-  if (rclone.status === 'fulfilled') {
-    $('#rcloneSpeed').textContent = `${formatSize(rclone.value.speed || 0)}/s`;
-  }
-  if (aria2.status === 'fulfilled') {
-    const stat = aria2.value.globalStat || {};
-    $('#aria2Speed').textContent = `${formatSize(Number(stat.downloadSpeed || 0))}/s`;
-    $('#activeCount').textContent = String(Number(stat.numActive || 0) + Number(stat.numWaiting || 0));
+  try {
+    const stats = await api('/api/transfers/stats');
+    $('#transferSpeed').textContent = `${formatSize(stats.transferSpeed || 0)}/s`;
+    $('#downloadSpeed').textContent = `${formatSize(stats.downloadSpeed || 0)}/s`;
+    $('#activeCount').textContent = String(Number(stats.activeCount || 0));
+  } catch {
+    $('#transferSpeed').textContent = '-';
+    $('#downloadSpeed').textContent = '-';
+    $('#activeCount').textContent = '-';
   }
 }
 
@@ -354,7 +350,11 @@ function renderFiles() {
     nameButton.type = 'button';
     nameButton.className = item.IsDir ? 'file-name folder' : 'file-name';
     nameButton.title = item.Name;
-    nameButton.textContent = item.IsDir ? `目录 ${item.Name}` : item.Name;
+    const nameIcon = document.createElement('span');
+    nameIcon.className = item.IsDir ? 'file-icon folder' : 'file-icon';
+    const nameText = document.createElement('span');
+    nameText.textContent = item.Name;
+    nameButton.append(nameIcon, nameText);
     nameButton.addEventListener('click', () => {
       if (item.IsDir) navigateTo(item.Path);
     });
@@ -374,17 +374,20 @@ function renderFiles() {
     if (!item.IsDir) {
       const sendButton = document.createElement('button');
       sendButton.type = 'button';
+      sendButton.className = 'action-button primary-action';
       sendButton.textContent = '发送';
       sendButton.addEventListener('click', (event) => sendItem(item, event.currentTarget));
       actionCell.append(sendButton);
 
       const downloadLink = document.createElement('a');
+      downloadLink.className = 'action-link';
       downloadLink.href = `/api/download?${new URLSearchParams({ remote: state.remote, path: item.Path })}`;
       downloadLink.textContent = '下载';
       actionCell.append(downloadLink);
     }
     const deleteButton = document.createElement('button');
     deleteButton.type = 'button';
+    deleteButton.className = 'action-button danger-action';
     deleteButton.textContent = item.IsDir ? '删除空目录' : '删除';
     deleteButton.addEventListener('click', (event) => deleteItem(item, event.currentTarget));
     actionCell.append(deleteButton);
@@ -457,9 +460,9 @@ async function sendItem(item, button) {
   state.sendSettings = settings;
   localStorage.setItem('lanTransferPanel.sendSettings', JSON.stringify(settings));
   const thresholdBytes = Math.round(Number(settings.thresholdGb || 1) * 1024 ** 3);
-  const route = Number(item.Size || 0) >= thresholdBytes ? 'aria2' : settings.smallMethod;
+  const route = Number(item.Size || 0) >= thresholdBytes ? 'receiver' : settings.smallMethod;
   const ok = window.confirm(
-    `发送：${item.Name}\n策略：${route === 'aria2' ? '大文件 aria2 拉取' : route || '未配置'}\n继续？`,
+    `发送：${item.Name}\n方式：${sendRouteLabel(route)}\n继续？`,
   );
   if (!ok) return;
 
@@ -472,20 +475,20 @@ async function sendItem(item, button) {
         path: item.Path,
         thresholdBytes,
         publicHost: settings.publicHost,
-        peerAria2Url: settings.peerAria2Url,
-        peerAria2Secret: settings.peerAria2Secret,
+        peerReceiverUrl: settings.peerReceiverUrl,
+        peerReceiverToken: settings.peerReceiverToken,
         peerDir: settings.peerDir,
         smallMethod: settings.smallMethod,
-        rcloneTarget: settings.rcloneTarget,
-        rsyncTarget: settings.rsyncTarget,
+        copyTarget: settings.copyTarget,
+        syncTarget: settings.syncTarget,
       },
     });
-    if (result.route === 'aria2') {
-      showMessage(`已交给对端 aria2：${result.gid}`);
-    } else if (result.route === 'rclone') {
-      showMessage(`rclone 已复制到：${result.destination}`);
-    } else if (result.route === 'rsync') {
-      showMessage(`rsync 已发送到：${result.destination}`);
+    if (result.route === 'receiver') {
+      showMessage(`远端接收任务已创建：${result.gid}`);
+    } else if (result.route === 'copy') {
+      showMessage(`已复制到：${result.destination}`);
+    } else if (result.route === 'sync') {
+      showMessage(`已同步到：${result.destination}`);
     } else {
       showMessage('发送任务已完成');
     }
@@ -494,6 +497,15 @@ async function sendItem(item, button) {
   } finally {
     setButtonBusy(button, false);
   }
+}
+
+function sendRouteLabel(route) {
+  return {
+    receiver: '远端接收',
+    copy: '直连复制',
+    sync: '同步发送',
+    none: '手动确认',
+  }[route] || '手动确认';
 }
 
 function renderTasks(data) {
@@ -506,7 +518,7 @@ function renderTasks(data) {
   if (!tasks.length) {
     const empty = document.createElement('div');
     empty.className = 'empty-state inline';
-    empty.textContent = '暂无 aria2 任务';
+    empty.textContent = '暂无下载任务';
     taskRows.append(empty);
     return;
   }
@@ -519,7 +531,10 @@ function renderTasks(data) {
     item.innerHTML = `
       <div class="task-main">
         <strong title="${escapeHtml(name)}">${escapeHtml(name)}</strong>
-        <span>${statusText(task.status)} · ${formatSize(task.completedLength)} / ${formatSize(task.totalLength)} · ${formatSize(task.downloadSpeed)}/s</span>
+        <span>
+          <i class="task-status ${taskStatusClass(task.status)}">${statusText(task.status)}</i>
+          ${formatSize(task.completedLength)} / ${formatSize(task.totalLength)} · ${formatSize(task.downloadSpeed)}/s
+        </span>
         <div class="progress"><i style="width:${percent}%"></i></div>
       </div>
       <div class="task-actions"></div>
@@ -559,7 +574,7 @@ function taskButton(label, onClick) {
 
 async function controlTask(gid, action) {
   try {
-    await api('/api/aria2/control', {
+    await api('/api/downloads/control', {
       method: 'POST',
       body: { gid, action },
     });
@@ -693,27 +708,30 @@ function loadSortState() {
 
 function loadSendSettings() {
   try {
+    const saved = JSON.parse(localStorage.getItem('lanTransferPanel.sendSettings') || '{}');
+    const smallMethod = ['none', 'copy', 'sync'].includes(saved.smallMethod) ? saved.smallMethod : 'none';
     return {
       thresholdGb: 1,
       publicHost: '10.42.0.1',
-      peerAria2Url: '',
-      peerAria2Secret: '',
+      peerReceiverUrl: '',
+      peerReceiverToken: '',
       peerDir: '',
       smallMethod: 'none',
-      rcloneTarget: '',
-      rsyncTarget: '',
-      ...JSON.parse(localStorage.getItem('lanTransferPanel.sendSettings') || '{}'),
+      copyTarget: '',
+      syncTarget: '',
+      ...saved,
+      smallMethod,
     };
   } catch {
     return {
       thresholdGb: 1,
       publicHost: '10.42.0.1',
-      peerAria2Url: '',
-      peerAria2Secret: '',
+      peerReceiverUrl: '',
+      peerReceiverToken: '',
       peerDir: '',
       smallMethod: 'none',
-      rcloneTarget: '',
-      rsyncTarget: '',
+      copyTarget: '',
+      syncTarget: '',
     };
   }
 }
@@ -721,24 +739,24 @@ function loadSendSettings() {
 function fillSendSettings() {
   $('#sendThresholdGb').value = state.sendSettings.thresholdGb || 1;
   $('#sendPublicHost').value = state.sendSettings.publicHost || '10.42.0.1';
-  $('#peerAria2Url').value = state.sendSettings.peerAria2Url || '';
-  $('#peerAria2Secret').value = state.sendSettings.peerAria2Secret || '';
+  $('#peerReceiverUrl').value = state.sendSettings.peerReceiverUrl || '';
+  $('#peerReceiverToken').value = state.sendSettings.peerReceiverToken || '';
   $('#peerDir').value = state.sendSettings.peerDir || '';
   $('#smallMethod').value = state.sendSettings.smallMethod || 'none';
-  $('#rcloneTarget').value = state.sendSettings.rcloneTarget || '';
-  $('#rsyncTarget').value = state.sendSettings.rsyncTarget || '';
+  $('#copyTarget').value = state.sendSettings.copyTarget || '';
+  $('#syncTarget').value = state.sendSettings.syncTarget || '';
 }
 
 function readSendSettings() {
   return {
     thresholdGb: Number($('#sendThresholdGb').value || 1),
     publicHost: $('#sendPublicHost').value.trim() || '10.42.0.1',
-    peerAria2Url: $('#peerAria2Url').value.trim(),
-    peerAria2Secret: $('#peerAria2Secret').value.trim(),
+    peerReceiverUrl: $('#peerReceiverUrl').value.trim(),
+    peerReceiverToken: $('#peerReceiverToken').value.trim(),
     peerDir: $('#peerDir').value.trim(),
     smallMethod: $('#smallMethod').value,
-    rcloneTarget: $('#rcloneTarget').value.trim(),
-    rsyncTarget: $('#rsyncTarget').value.trim(),
+    copyTarget: $('#copyTarget').value.trim(),
+    syncTarget: $('#syncTarget').value.trim(),
   };
 }
 
@@ -764,6 +782,17 @@ function statusText(status) {
     error: '出错',
     removed: '已移除',
   }[status] || status;
+}
+
+function taskStatusClass(status) {
+  return {
+    active: 'active',
+    waiting: 'waiting',
+    paused: 'paused',
+    complete: 'complete',
+    error: 'error',
+    removed: 'removed',
+  }[status] || 'waiting';
 }
 
 function formatSize(value) {

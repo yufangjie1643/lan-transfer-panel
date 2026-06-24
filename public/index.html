@@ -3,26 +3,29 @@
   <head>
     <meta charset="utf-8">
     <meta name="viewport" content="width=device-width, initial-scale=1">
-    <title>局域网文件面板</title>
+    <title>文件中转台</title>
     <link rel="stylesheet" href="/styles.css">
   </head>
   <body>
     <main id="loginView" class="login-shell">
       <section class="login-panel">
-        <div>
-          <p class="eyebrow">LAN Transfer Panel</p>
-          <h1>局域网文件面板</h1>
+        <div class="login-brand">
+          <span class="brand-mark">L</span>
+          <div>
+            <p class="eyebrow">Local Transfer</p>
+            <h1>文件中转台</h1>
+          </div>
         </div>
         <form id="loginForm" class="login-form">
           <label>
             <span>用户名</span>
-            <input id="loginUser" name="username" autocomplete="username" value="rclone">
+            <input id="loginUser" name="username" autocomplete="username" placeholder="输入用户名">
           </label>
           <label>
             <span>密码</span>
             <input id="loginPass" name="password" type="password" autocomplete="current-password">
           </label>
-          <button type="submit">登录</button>
+          <button type="submit">进入面板</button>
           <p id="loginError" class="form-error" hidden></p>
         </form>
       </section>
@@ -30,13 +33,16 @@
 
     <main id="appView" class="app-shell" hidden>
       <header class="topbar">
-        <div>
-          <p class="eyebrow">rclone + aria2</p>
-          <h1>局域网文件面板</h1>
+        <div class="app-title">
+          <span class="brand-mark small">L</span>
+          <div>
+            <p class="eyebrow">Local Transfer</p>
+            <h1>文件中转台</h1>
+          </div>
         </div>
         <div class="topbar-actions">
           <span id="statusBadge" class="badge">连接中</span>
-          <button id="refreshAllBtn" class="ghost-button" type="button">刷新</button>
+          <button id="refreshAllBtn" class="ghost-button" type="button">刷新全部</button>
           <button id="logoutBtn" class="ghost-button" type="button">退出</button>
         </div>
       </header>
@@ -45,7 +51,7 @@
         <aside class="sidebar">
           <section class="panel">
             <div class="panel-title">
-              <h2>位置</h2>
+              <h2>存储位置</h2>
               <button id="reloadRemotesBtn" class="icon-button" type="button" title="刷新位置">↻</button>
             </div>
             <nav id="remoteList" class="remote-list"></nav>
@@ -53,54 +59,54 @@
 
           <section class="panel">
             <div class="panel-title">
-              <h2>添加下载</h2>
+              <h2>新建下载</h2>
             </div>
             <form id="downloadForm" class="download-form">
               <textarea id="downloadUrl" rows="4" placeholder="粘贴 http、https、ftp 或 magnet 链接"></textarea>
-              <button type="submit">交给 aria2</button>
+              <button type="submit">加入队列</button>
             </form>
           </section>
 
           <section class="panel">
             <div class="panel-title">
-              <h2>发送策略</h2>
+              <h2>发送规则</h2>
             </div>
             <form id="sendSettingsForm" class="send-settings">
               <label>
-                <span>大文件阈值 GB</span>
+                <span>大文件阈值</span>
                 <input id="sendThresholdGb" type="number" min="0.01" step="0.01" value="1">
               </label>
               <label>
-                <span>本机对外地址</span>
+                <span>本机访问地址</span>
                 <input id="sendPublicHost" value="10.42.0.1">
               </label>
               <label>
-                <span>对端 aria2 RPC</span>
-                <input id="peerAria2Url" placeholder="http://10.42.0.2:6800/jsonrpc">
+                <span>远端接收地址</span>
+                <input id="peerReceiverUrl" placeholder="http://10.42.0.2:6800/...">
               </label>
               <label>
-                <span>对端 aria2 secret</span>
-                <input id="peerAria2Secret" type="password" placeholder="rpc-secret">
+                <span>访问口令</span>
+                <input id="peerReceiverToken" type="password" placeholder="接收端口令">
               </label>
               <label>
-                <span>对端下载目录</span>
+                <span>远端保存目录</span>
                 <input id="peerDir" placeholder="/path/to/downloads">
               </label>
               <label>
-                <span>小文件方式</span>
+                <span>小文件处理</span>
                 <select id="smallMethod">
-                  <option value="none">手动处理</option>
-                  <option value="rclone">rclone copy</option>
-                  <option value="rsync">rsync</option>
+                  <option value="none">手动确认</option>
+                  <option value="copy">直连复制</option>
+                  <option value="sync">同步发送</option>
                 </select>
               </label>
               <label>
-                <span>rclone 目标目录</span>
-                <input id="rcloneTarget" placeholder="peer:/target/dir">
+                <span>复制目标</span>
+                <input id="copyTarget" placeholder="peer:/target/dir">
               </label>
               <label>
-                <span>rsync 目标</span>
-                <input id="rsyncTarget" placeholder="user@10.42.0.2:/target/dir/">
+                <span>同步目标</span>
+                <input id="syncTarget" placeholder="user@10.42.0.2:/target/dir/">
               </label>
               <button type="submit" class="secondary-button">保存策略</button>
             </form>
@@ -108,12 +114,12 @@
 
           <section class="panel">
             <div class="panel-title">
-              <h2>传输状态</h2>
+              <h2>传输概览</h2>
             </div>
             <dl class="metrics">
-              <div><dt>rclone 速度</dt><dd id="rcloneSpeed">0 B/s</dd></div>
-              <div><dt>aria2 下载</dt><dd id="aria2Speed">0 B/s</dd></div>
-              <div><dt>活动任务</dt><dd id="activeCount">0</dd></div>
+              <div><dt>文件传输</dt><dd id="transferSpeed">0 B/s</dd></div>
+              <div><dt>下载速度</dt><dd id="downloadSpeed">0 B/s</dd></div>
+              <div><dt>队列任务</dt><dd id="activeCount">0</dd></div>
             </dl>
           </section>
         </aside>
@@ -125,10 +131,10 @@
               <p id="pathHint" class="path-hint"></p>
             </div>
             <div class="toolbar-actions">
-              <input id="fileFilter" class="file-filter" type="search" placeholder="筛选文件">
+              <input id="fileFilter" class="file-filter" type="search" placeholder="搜索当前目录">
               <input id="fileInput" type="file" multiple hidden>
               <button id="uploadBtn" type="button">上传</button>
-              <button id="mkdirBtn" type="button">新建文件夹</button>
+              <button id="mkdirBtn" type="button">新建</button>
               <button id="refreshFilesBtn" type="button">刷新</button>
             </div>
           </div>
@@ -153,7 +159,7 @@
 
           <section class="tasks-panel">
             <div class="panel-title">
-              <h2>aria2 任务</h2>
+              <h2>下载队列</h2>
               <button id="refreshTasksBtn" class="icon-button" type="button" title="刷新任务">↻</button>
             </div>
             <div id="taskRows" class="task-list"></div>

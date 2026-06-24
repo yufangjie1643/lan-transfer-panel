@@ -306,32 +306,23 @@ async function handleApi(req, res, requestUrl) {
     return;
   }
 
-  if (endpoint === '/api/aria2/tasks' && req.method === 'GET') {
-    const keys = [
-      'gid',
-      'status',
-      'totalLength',
-      'completedLength',
-      'downloadSpeed',
-      'uploadSpeed',
-      'numSeeders',
-      'connections',
-      'dir',
-      'files',
-      'errorMessage',
-      'bittorrent',
-    ];
-    const [globalStat, active, waiting, stopped] = await Promise.all([
-      aria2('aria2.getGlobalStat'),
-      aria2('aria2.tellActive', [keys]),
-      aria2('aria2.tellWaiting', [0, 50, keys]),
-      aria2('aria2.tellStopped', [0, 50, keys]),
-    ]);
-    sendJson(res, 200, { globalStat, active, waiting, stopped });
+  if (endpoint === '/api/transfers/stats' && req.method === 'GET') {
+    const [storage, downloads] = await Promise.allSettled([rcloneRc('core/stats', {}), downloadTasks()]);
+    const globalStat = downloads.status === 'fulfilled' ? downloads.value.globalStat || {} : {};
+    sendJson(res, 200, {
+      transferSpeed: storage.status === 'fulfilled' ? Number(storage.value.speed || 0) : 0,
+      downloadSpeed: Number(globalStat.downloadSpeed || 0),
+      activeCount: Number(globalStat.numActive || 0) + Number(globalStat.numWaiting || 0),
+    });
     return;
   }
 
-  if (endpoint === '/api/aria2/add' && req.method === 'POST') {
+  if ((endpoint === '/api/downloads/tasks' || endpoint === '/api/aria2/tasks') && req.method === 'GET') {
+    sendJson(res, 200, await downloadTasks());
+    return;
+  }
+
+  if ((endpoint === '/api/downloads/add' || endpoint === '/api/aria2/add') && req.method === 'POST') {
     const body = await readJson(req);
     const uri = assertDownloadUri(body.url);
     const options = {};
@@ -348,7 +339,7 @@ async function handleApi(req, res, requestUrl) {
     return;
   }
 
-  if (endpoint === '/api/aria2/control' && req.method === 'POST') {
+  if ((endpoint === '/api/downloads/control' || endpoint === '/api/aria2/control') && req.method === 'POST') {
     const body = await readJson(req);
     const gid = assertGid(body.gid);
     const actions = {
@@ -358,7 +349,7 @@ async function handleApi(req, res, requestUrl) {
       purge: 'aria2.removeDownloadResult',
     };
     const method = actions[body.action];
-    if (!method) throw Object.assign(new Error('不支持的 aria2 操作'), { statusCode: 400 });
+    if (!method) throw Object.assign(new Error('不支持的任务操作'), { statusCode: 400 });
     const result = await aria2(method, [gid]);
     sendJson(res, 200, { ok: true, result });
     return;
@@ -442,6 +433,30 @@ async function aria2(method, params = []) {
   return aria2Request(runtime.aria2Url, runtime.aria2Secret, method, params);
 }
 
+async function downloadTasks() {
+  const keys = [
+    'gid',
+    'status',
+    'totalLength',
+    'completedLength',
+    'downloadSpeed',
+    'uploadSpeed',
+    'numSeeders',
+    'connections',
+    'dir',
+    'files',
+    'errorMessage',
+    'bittorrent',
+  ];
+  const [globalStat, active, waiting, stopped] = await Promise.all([
+    aria2('aria2.getGlobalStat'),
+    aria2('aria2.tellActive', [keys]),
+    aria2('aria2.tellWaiting', [0, 50, keys]),
+    aria2('aria2.tellStopped', [0, 50, keys]),
+  ]);
+  return { globalStat, active, waiting, stopped };
+}
+
 async function aria2Request(url, secret, method, params = []) {
   const response = await fetch(url, {
     method: 'POST',
@@ -455,7 +470,7 @@ async function aria2Request(url, secret, method, params = []) {
   });
   const data = await response.json();
   if (data.error) {
-    throw Object.assign(new Error(data.error.message || 'aria2 RPC failed'), {
+    throw Object.assign(new Error(data.error.message || '下载服务请求失败'), {
       statusCode: 502,
       detail: data.error,
     });
@@ -483,23 +498,23 @@ async function sendToPeer(body) {
   }
 
   const smallMethod = String(body.smallMethod || 'none');
-  if (smallMethod === 'rclone') {
+  if (smallMethod === 'copy' || smallMethod === 'rclone') {
     return copySmallFileWithRclone(remote, remotePath, stat.item, body);
   }
-  if (smallMethod === 'rsync') {
+  if (smallMethod === 'sync' || smallMethod === 'rsync') {
     return copySmallFileWithRsync(remote, remotePath, body);
   }
 
-  throw Object.assign(new Error('这个文件低于阈值，请配置 rclone 目标或 rsync 目标'), {
+  throw Object.assign(new Error('这个文件低于阈值，请配置复制目标或同步目标'), {
     statusCode: 400,
   });
 }
 
 async function sendLargeFileWithAria2(remote, remotePath, item, body) {
-  const peerAria2Url = assertRpcUrl(body.peerAria2Url);
-  const peerAria2Secret = String(body.peerAria2Secret || '').trim();
-  if (!peerAria2Secret) {
-    throw Object.assign(new Error('缺少对端 aria2 RPC secret'), { statusCode: 400 });
+  const peerReceiverUrl = assertRpcUrl(body.peerReceiverUrl || body.peerAria2Url);
+  const peerReceiverToken = String(body.peerReceiverToken || body.peerAria2Secret || '').trim();
+  if (!peerReceiverToken) {
+    throw Object.assign(new Error('缺少远端接收口令'), { statusCode: 400 });
   }
   const peerDir = String(body.peerDir || '').trim();
   if (!peerDir) {
@@ -509,7 +524,7 @@ async function sendLargeFileWithAria2(remote, remotePath, item, body) {
 
   const served = await ensureServedRemote(remote, publicHost);
   const url = `${served.origin}/${encodeRemotePath(remotePath)}`;
-  const gid = await aria2Request(peerAria2Url, peerAria2Secret, 'aria2.addUri', [
+  const gid = await aria2Request(peerReceiverUrl, peerReceiverToken, 'aria2.addUri', [
     [url],
     {
       dir: peerDir,
@@ -522,7 +537,7 @@ async function sendLargeFileWithAria2(remote, remotePath, item, body) {
 
   return {
     ok: true,
-    route: 'aria2',
+    route: 'receiver',
     gid,
     sourceUrl: redactUrl(url),
     servePort: served.port,
@@ -531,7 +546,7 @@ async function sendLargeFileWithAria2(remote, remotePath, item, body) {
 }
 
 async function copySmallFileWithRclone(remote, remotePath, item, body) {
-  const target = splitRcloneTarget(body.rcloneTarget);
+  const target = splitRcloneTarget(body.copyTarget || body.rcloneTarget);
   const dstRemote = joinRemotePath(target.path, item.Name || path.posix.basename(remotePath));
   await rcloneRc('operations/copyfile', {
     srcFs: `${remote}:`,
@@ -541,14 +556,14 @@ async function copySmallFileWithRclone(remote, remotePath, item, body) {
   });
   return {
     ok: true,
-    route: 'rclone',
+    route: 'copy',
     destination: `${target.remote}:${dstRemote}`,
   };
 }
 
 async function copySmallFileWithRsync(remote, remotePath, body) {
-  const target = String(body.rsyncTarget || '').trim();
-  if (!target) throw Object.assign(new Error('缺少 rsync 目标'), { statusCode: 400 });
+  const target = String(body.syncTarget || body.rsyncTarget || '').trim();
+  if (!target) throw Object.assign(new Error('缺少同步目标'), { statusCode: 400 });
   const source = await localPathForRemote(remote, remotePath);
   const result = await runCommand('rsync', [
     '-avP',
@@ -560,7 +575,7 @@ async function copySmallFileWithRsync(remote, remotePath, body) {
   ]);
   return {
     ok: true,
-    route: 'rsync',
+    route: 'sync',
     destination: target,
     output: result.stdout.slice(-4000),
   };
@@ -819,10 +834,10 @@ function assertRpcUrl(value) {
   try {
     parsed = new URL(url);
   } catch {
-    throw Object.assign(new Error('aria2 RPC 地址不合法'), { statusCode: 400 });
+    throw Object.assign(new Error('远端接收地址不合法'), { statusCode: 400 });
   }
   if (!['http:', 'https:'].includes(parsed.protocol)) {
-    throw Object.assign(new Error('aria2 RPC 地址仅支持 http/https'), { statusCode: 400 });
+    throw Object.assign(new Error('远端接收地址仅支持 http/https'), { statusCode: 400 });
   }
   return parsed.toString();
 }
@@ -839,7 +854,7 @@ function splitRcloneTarget(value) {
   const input = String(value || '').trim();
   const match = input.match(/^([A-Za-z0-9_.-]+):(.*)$/);
   if (!match) {
-    throw Object.assign(new Error('rclone 目标格式应为 remote:/path'), { statusCode: 400 });
+    throw Object.assign(new Error('复制目标格式应为 remote:/path'), { statusCode: 400 });
   }
   return {
     remote: match[1],
@@ -850,7 +865,7 @@ function splitRcloneTarget(value) {
 function assertGid(value) {
   const gid = String(value || '');
   if (!/^[0-9a-fA-F]+$/.test(gid)) {
-    throw Object.assign(new Error('aria2 GID 不合法'), { statusCode: 400 });
+    throw Object.assign(new Error('任务编号不合法'), { statusCode: 400 });
   }
   return gid;
 }
