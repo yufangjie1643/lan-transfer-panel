@@ -15,6 +15,12 @@ npm start
 
 默认登录凭据复用 `~/.config/file-transfer/rclone-rc.credentials`。
 
+## 客户端开发
+
+Windows 桌面客户端可直接调用本服务的 HTTP API。接口、认证 Cookie、文件上传下载、目录打包下载和任务队列说明见：
+
+- [`docs/client-api.md`](docs/client-api.md)
+
 ## 环境变量
 
 - `PANEL_BIND`：监听地址，逗号分隔，默认 `127.0.0.1,10.42.0.1`
