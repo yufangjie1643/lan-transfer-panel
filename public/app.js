@@ -13,6 +13,7 @@ const state = {
   tasksRequestId: 0,
   filesLoading: false,
   filesError: '',
+  sshRemoteName: 'server',
   sendSettings: loadSendSettings(),
   tasksTimer: null,
   statsTimer: null,
@@ -192,7 +193,8 @@ for (const tab of $$('.side-tab')) {
 setSidePage(localStorage.getItem('lanTransferPanel.sidePage') || 'downloads');
 
 async function boot() {
-  await api('/api/session');
+  const session = await api('/api/session');
+  state.sshRemoteName = session.sshRemoteName || 'server';
   loginView.hidden = true;
   appView.hidden = false;
   fillSendSettings();
@@ -380,9 +382,17 @@ function renderFiles() {
     const actionCell = document.createElement('td');
     actionCell.className = 'row-actions';
     if (!item.IsDir) {
+      const aria2Button = document.createElement('button');
+      aria2Button.type = 'button';
+      aria2Button.className = 'action-button primary-action';
+      aria2Button.textContent = 'aria2';
+      aria2Button.title = '加入本机 aria2 下载队列';
+      aria2Button.addEventListener('click', (event) => downloadRemoteItem(item, event.currentTarget));
+      actionCell.append(aria2Button);
+
       const sendButton = document.createElement('button');
       sendButton.type = 'button';
-      sendButton.className = 'action-button primary-action';
+      sendButton.className = 'action-button';
       sendButton.textContent = '发送';
       sendButton.addEventListener('click', (event) => sendItem(item, event.currentTarget));
       actionCell.append(sendButton);
@@ -390,14 +400,27 @@ function renderFiles() {
       const downloadLink = document.createElement('a');
       downloadLink.className = 'action-link';
       downloadLink.href = `/api/download?${new URLSearchParams({ remote: state.remote, path: item.Path })}`;
-      downloadLink.textContent = '下载';
+      downloadLink.textContent = '浏览器';
+      downloadLink.title = '浏览器下载';
       actionCell.append(downloadLink);
     } else {
-      const archiveLink = document.createElement('a');
-      archiveLink.className = 'action-link primary-action';
-      archiveLink.href = `/api/download-folder?${new URLSearchParams({ remote: state.remote, path: item.Path })}`;
-      archiveLink.textContent = '打包下载';
-      actionCell.append(archiveLink);
+      if (state.remote === state.sshRemoteName) {
+        const aria2FolderButton = document.createElement('button');
+        aria2FolderButton.type = 'button';
+        aria2FolderButton.className = 'action-button primary-action';
+        aria2FolderButton.textContent = 'aria2';
+        aria2FolderButton.title = '加入本机 aria2 下载队列';
+        aria2FolderButton.addEventListener('click', (event) =>
+          downloadRemoteItem(item, event.currentTarget),
+        );
+        actionCell.append(aria2FolderButton);
+      } else {
+        const archiveLink = document.createElement('a');
+        archiveLink.className = 'action-link primary-action';
+        archiveLink.href = `/api/download-folder?${new URLSearchParams({ remote: state.remote, path: item.Path })}`;
+        archiveLink.textContent = '打包下载';
+        actionCell.append(archiveLink);
+      }
     }
     const deleteButton = document.createElement('button');
     deleteButton.type = 'button';
@@ -467,6 +490,89 @@ function renderSortIndicators() {
   for (const button of $$('.sort-button')) {
     button.classList.toggle('active', button.dataset.sort === state.fileSortKey);
   }
+}
+
+async function downloadRemoteItem(item, button) {
+  if (!item.IsDir) {
+    const ok = window.confirm(`下载到本机 aria2：${item.Name}\n继续？`);
+    if (!ok) return;
+  }
+
+  setButtonBusy(button, true, '添加中');
+  try {
+    let result = await api('/api/downloads/add-remote', {
+      method: 'POST',
+      body: {
+        remote: state.remote,
+        path: item.Path,
+      },
+    });
+    if (result.requiresConfirmation) {
+      const compression = confirmFolderArchiveDownload(item, result);
+      if (!compression) return;
+      result = await api('/api/downloads/add-remote', {
+        method: 'POST',
+        body: {
+          remote: state.remote,
+          path: item.Path,
+          confirmed: true,
+          planToken: result.planToken,
+          compression,
+        },
+      });
+    }
+
+    showDownloadResult(result);
+    setSidePage('downloads');
+    await Promise.allSettled([loadTasks(), loadStats()]);
+  } catch (error) {
+    showMessage(error.message, true);
+  } finally {
+    setButtonBusy(button, false);
+  }
+}
+
+function confirmFolderArchiveDownload(item, result) {
+  const summary = result.summary || {};
+  const reasons = (result.plan?.reasons || []).map(folderArchiveReason).join('、');
+  const ok = window.confirm(
+    [
+      `文件夹：${item.Name}`,
+      `文件数：${summary.fileCount || 0}`,
+      `总大小：${formatSize(summary.totalSize || 0)}`,
+      `小文件归档：${result.plan?.archive?.fileCount || 0} 个，${formatSize(result.plan?.archive?.totalSize || 0)}`,
+      `大文件直下：${result.plan?.direct?.fileCount || 0} 个，${formatSize(result.plan?.direct?.totalSize || 0)}`,
+      `小文件阈值：${formatSize(result.plan?.smallFileBytes || 0)}`,
+      `小文件打包门槛：超过 ${result.plan?.minSmallFilesToArchive || 10} 个`,
+      '达到门槛的小文件打包下载后自动解压，其余文件直接加入 aria2。',
+      '继续？',
+    ].join('\n'),
+  );
+  if (!ok) return '';
+  return 'none';
+}
+
+function showDownloadResult(result) {
+  const backend = result.sourceBackend ? `，源：${result.sourceBackend}` : '';
+  if (result.route === 'ssh-folder-files') {
+    showMessage(`已加入 ${result.count || 0} 个 aria2 文件任务${backend}`);
+    return;
+  }
+  if (result.route === 'ssh-folder-archive') {
+    showMessage(`打包下载任务已加入：${result.gid}，完成后自动解压${backend}`);
+    return;
+  }
+  if (result.route === 'ssh-folder-mixed') {
+    showMessage(`混合下载任务已加入：小文件打包，大文件直下${backend}`);
+    return;
+  }
+  showMessage(`aria2 任务已加入：${result.gid}${backend}`);
+}
+
+function folderArchiveReason(reason) {
+  return {
+    'file-count': '文件数超过 10',
+  }[reason] || reason;
 }
 
 async function sendItem(item, button) {

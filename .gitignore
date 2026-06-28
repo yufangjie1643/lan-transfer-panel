@@ -1,4 +1,6 @@
 node_modules/
+.codegraph/
+.dev-logs/
 .env
 .env.*
 npm-debug.log*
@@ -6,4 +8,7 @@ yarn-debug.log*
 yarn-error.log*
 coverage/
 dist/
+desktop/src-tauri/gen/
+desktop/src-tauri/target/
+desktop/.dev-logs/
 .DS_Store

@@ -8,6 +8,27 @@ import crypto from 'node:crypto';
 import { spawn } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 import net from 'node:net';
+import { Readable } from 'node:stream';
+import { buildLocalAria2Download } from './lib/aria2-download.js';
+import { chooseFolderDownloadPlan } from './lib/folder-plan.js';
+import { createFolderPlanCache } from './lib/folder-plan-cache.js';
+import { getFolderDownloadWorkOrder } from './lib/folder-download-order.js';
+import {
+  loadPostDownloadJobs,
+  postDownloadJobsStorePath,
+  savePostDownloadJobs,
+} from './lib/post-download-store.js';
+import { publicFolderPlan } from './lib/public-folder-plan.js';
+import { buildSshArchiveScript } from './lib/ssh-archive-script.js';
+import { normalizeSshRemotePath } from './lib/ssh-paths.js';
+import { encodeSshPythonArg, encodeSshRemotePath } from './lib/ssh-python-args.js';
+import {
+  buildPythonRangeServeScript,
+  buildRcloneServeArgs,
+  buildSshServedFileDownload,
+  buildSshTunnelArgs,
+} from './lib/ssh-source.js';
+import { buildCorsHeaders } from './lib/cors.js';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -22,20 +43,46 @@ const bindAddresses = (process.env.PANEL_BIND || '127.0.0.1,10.42.0.1')
 const maxJsonBytes = 1024 * 1024;
 const sessions = new Map();
 const sessionTtlMs = 12 * 60 * 60 * 1000;
+const downloadTokens = new Map();
+const downloadTokenTtlMs = 2 * 60 * 1000;
 const servedRemotes = new Map();
+const sshServedDirectories = new Map();
+const sshTunnels = new Map();
+const postDownloadJobs = new Map();
+const folderPlanCache = createFolderPlanCache();
 const serveTtlMs = 2 * 60 * 60 * 1000;
 
 const runtime = await loadRuntime();
+const postDownloadStorePath = postDownloadJobsStorePath(path.dirname(runtime.aria2ConfPath));
+for (const [gid, job] of await loadPostDownloadJobs(postDownloadStorePath)) {
+  postDownloadJobs.set(gid, job);
+}
 
 setInterval(() => {
   const now = Date.now();
   for (const [sid, session] of sessions) {
     if (session.expiresAt <= now) sessions.delete(sid);
   }
+  for (const [token, download] of downloadTokens) {
+    if (download.expiresAt <= now) downloadTokens.delete(token);
+  }
   for (const [key, served] of servedRemotes) {
     if (served.expiresAt <= now) stopServedRemote(key);
   }
+  for (const [key, served] of sshServedDirectories) {
+    if (served.expiresAt <= now) stopSshServedDirectory(key);
+  }
+  for (const [key, tunnel] of sshTunnels) {
+    if (tunnel.expiresAt <= now) stopSshTunnel(key);
+  }
 }, 10 * 60 * 1000).unref();
+
+let postDownloadMonitorRunning = false;
+setInterval(() => {
+  monitorPostDownloadJobs().catch((error) => {
+    console.error(`post download monitor: ${error.message}`);
+  });
+}, 3000).unref();
 
 async function loadRuntime() {
   const rcloneCredentialsPath = expandHome(
@@ -43,21 +90,25 @@ async function loadRuntime() {
   );
   const aria2ConfPath = expandHome(process.env.ARIA2_CONF || '~/.config/file-transfer/aria2.conf');
 
-  const rcloneCredentials = parseKeyValue(await fsp.readFile(rcloneCredentialsPath, 'utf8'));
-  const aria2Config = parseKeyValue(await fsp.readFile(aria2ConfPath, 'utf8'));
+  const rcloneCredentials = parseKeyValue(await readTextIfExists(rcloneCredentialsPath));
+  const aria2Config = parseKeyValue(await readTextIfExists(aria2ConfPath));
 
-  const rcloneUrl = stripTrailingSlash(process.env.RCLONE_URL || rcloneCredentials.url);
+  const rcloneUrl = stripTrailingSlash(process.env.RCLONE_URL || rcloneCredentials.url || '');
   const rcloneUser = process.env.RCLONE_USER || rcloneCredentials.username;
   const rclonePass = process.env.RCLONE_PASS || rcloneCredentials.password;
   const aria2Url = process.env.ARIA2_URL || 'http://127.0.0.1:6800/jsonrpc';
-  const aria2Secret = process.env.ARIA2_SECRET || aria2Config['rpc-secret'];
-  const aria2Dir = process.env.ARIA2_DIR || aria2Config.dir || '/mnt/data/downloads/aria2';
+  const aria2Secret = process.env.ARIA2_SECRET || aria2Config['rpc-secret'] || '';
+  const aria2Dir = process.env.ARIA2_DIR || aria2Config.dir || '';
+  const sshHost = process.env.SSH_HOST || 'yufanssh';
+  const sshRoot = process.env.SSH_ROOT || '/home/yufan';
+  const sshRemoteName = process.env.SSH_REMOTE_NAME || 'server';
+  const sshCommand = process.env.SSH_COMMAND || 'ssh';
 
-  if (!rcloneUrl || !rcloneUser || !rclonePass) {
-    throw new Error(`rclone credentials are incomplete: ${rcloneCredentialsPath}`);
-  }
-  if (!aria2Secret) {
-    throw new Error(`aria2 rpc-secret is missing: ${aria2ConfPath}`);
+  const hasRcloneRc = Boolean(rcloneUrl && rcloneUser && rclonePass);
+  const appUser = process.env.PANEL_USER || rcloneUser || os.userInfo().username || 'admin';
+  const appPass = process.env.PANEL_PASS || rclonePass;
+  if (!appPass) {
+    throw new Error('PANEL_PASS is required when local rclone credentials are not configured');
   }
 
   return {
@@ -66,12 +117,26 @@ async function loadRuntime() {
     rcloneUrl,
     rcloneUser,
     rclonePass,
+    hasRcloneRc,
     aria2Url,
     aria2Secret,
     aria2Dir,
-    appUser: process.env.PANEL_USER || rcloneUser,
-    appPass: process.env.PANEL_PASS || rclonePass,
+    sshHost,
+    sshRoot,
+    sshRemoteName,
+    sshCommand,
+    appUser,
+    appPass,
   };
+}
+
+async function readTextIfExists(filePath) {
+  try {
+    return await fsp.readFile(filePath, 'utf8');
+  } catch (error) {
+    if (error.code === 'ENOENT') return '';
+    throw error;
+  }
 }
 
 function expandHome(input) {
@@ -145,6 +210,21 @@ function sendError(res, status, message, detail) {
   sendJson(res, status, { error: message, detail });
 }
 
+function applyCors(req, res) {
+  const headers = buildCorsHeaders(req.headers.origin, process.env.PANEL_CORS_ORIGINS);
+  for (const [name, value] of Object.entries(headers)) {
+    res.setHeader(name, value);
+  }
+}
+
+function sendNoContent(res) {
+  res.writeHead(204, {
+    'Cache-Control': 'no-store',
+    'Content-Length': 0,
+  });
+  res.end();
+}
+
 function readJson(req) {
   return new Promise((resolve, reject) => {
     const chunks = [];
@@ -192,6 +272,12 @@ function requireAuth(req, res) {
 
 async function requestHandler(req, res) {
   try {
+    applyCors(req, res);
+    if (req.method === 'OPTIONS') {
+      sendNoContent(res);
+      return;
+    }
+
     const requestUrl = new URL(req.url || '/', `http://${req.headers.host || 'localhost'}`);
     if (requestUrl.pathname.startsWith('/api/')) {
       await handleApi(req, res, requestUrl);
@@ -201,7 +287,7 @@ async function requestHandler(req, res) {
   } catch (error) {
     console.error(error);
     if (!res.headersSent) {
-      sendError(res, error.statusCode || 500, error.message || '服务器错误');
+      sendError(res, error.statusCode || 500, error.message || '服务器错误', error.detail);
     } else {
       res.destroy(error);
     }
@@ -210,6 +296,11 @@ async function requestHandler(req, res) {
 
 async function handleApi(req, res, requestUrl) {
   const endpoint = requestUrl.pathname;
+
+  if (endpoint === '/api/download' && req.method === 'GET' && requestUrl.searchParams.has('downloadToken')) {
+    await handleDownloadWithToken(req, res, requestUrl);
+    return;
+  }
 
   if (endpoint === '/api/login' && req.method === 'POST') {
     const body = await readJson(req);
@@ -247,8 +338,11 @@ async function handleApi(req, res, requestUrl) {
     sendJson(res, 200, {
       ok: true,
       username: session.username,
-      rcloneUrl: runtime.rcloneUrl.replace(/\/\/.*@/, '//***@'),
+      rcloneUrl: runtime.rcloneUrl ? runtime.rcloneUrl.replace(/\/\/.*@/, '//***@') : null,
       aria2Dir: runtime.aria2Dir,
+      sshHost: runtime.sshHost,
+      sshRoot: runtime.sshRoot,
+      sshRemoteName: runtime.sshRemoteName,
       bindAddresses,
       port,
     });
@@ -256,15 +350,27 @@ async function handleApi(req, res, requestUrl) {
   }
 
   if (endpoint === '/api/remotes' && req.method === 'GET') {
+    const remotes = [runtime.sshRemoteName];
+    if (!runtime.hasRcloneRc) {
+      sendJson(res, 200, { remotes });
+      return;
+    }
     const result = await rcloneRc('config/listremotes', {});
+    remotes.push(...(result.remotes || []).map((remote) => String(remote).replace(/:$/, '')));
     sendJson(res, 200, {
-      remotes: (result.remotes || []).map((remote) => String(remote).replace(/:$/, '')),
+      remotes: [...new Set(remotes)],
     });
     return;
   }
 
   if (endpoint === '/api/list' && req.method === 'GET') {
     const remote = assertRemote(requestUrl.searchParams.get('remote'));
+    if (isSshRemote(remote)) {
+      const remotePath = normalizeSshRemotePath(requestUrl.searchParams.get('path') || '');
+      const result = await listSshFiles(remotePath);
+      sendJson(res, 200, { remote, path: remotePath, list: result.list.sort(sortItems) });
+      return;
+    }
     const remotePath = normalizeRemotePath(requestUrl.searchParams.get('path') || '');
     const result = await rcloneRc('operations/list', {
       fs: `${remote}:`,
@@ -329,6 +435,37 @@ async function handleApi(req, res, requestUrl) {
     if (body.dir) options.dir = String(body.dir);
     const gid = await aria2('aria2.addUri', [[uri], options]);
     sendJson(res, 200, { ok: true, gid });
+    return;
+  }
+
+  if (
+    (endpoint === '/api/downloads/add-remote' || endpoint === '/api/aria2/add-remote') &&
+    req.method === 'POST'
+  ) {
+    const body = await readJson(req);
+    const remote = assertRemote(body.remote);
+    const result = isSshRemote(remote)
+      ? await addSshFileToLocalAria2(body)
+      : await addRcloneFileToLocalAria2(body);
+    sendJson(res, 200, result);
+    return;
+  }
+
+  if (endpoint === '/api/virtual-drag-token' && req.method === 'POST') {
+    const body = await readJson(req);
+    const remote = assertRemote(body.remote);
+    const remotePath = isSshRemote(remote)
+      ? normalizeSshRemotePath(body.path || '')
+      : normalizeRemotePath(body.path || '');
+    if (!remotePath) throw Object.assign(new Error('缺少文件路径'), { statusCode: 400 });
+    const token = crypto.randomBytes(24).toString('hex');
+    const expiresAt = Date.now() + downloadTokenTtlMs;
+    downloadTokens.set(token, { remote, path: remotePath, expiresAt });
+    sendJson(res, 200, {
+      ok: true,
+      token,
+      expiresAt: new Date(expiresAt).toISOString(),
+    });
     return;
   }
 
@@ -409,6 +546,11 @@ async function serveStatic(req, res, requestUrl) {
 }
 
 async function rcloneRc(command, body) {
+  if (!runtime.hasRcloneRc) {
+    throw Object.assign(new Error('本机未配置 rclone RC；当前默认使用服务器 SSH 文件源'), {
+      statusCode: 400,
+    });
+  }
   const auth = Buffer.from(`${runtime.rcloneUser}:${runtime.rclonePass}`).toString('base64');
   const response = await fetch(`${runtime.rcloneUrl}/${command}`, {
     method: 'POST',
@@ -470,7 +612,7 @@ async function aria2Request(url, secret, method, params = []) {
       jsonrpc: '2.0',
       id: crypto.randomUUID(),
       method,
-      params: [`token:${secret}`, ...params],
+      params: secret ? [`token:${secret}`, ...params] : params,
     }),
   });
   const data = await response.json();
@@ -481,6 +623,223 @@ async function aria2Request(url, secret, method, params = []) {
     });
   }
   return data.result;
+}
+
+async function addSshFileToLocalAria2(body) {
+  const remotePath = normalizeSshRemotePath(body.path || '');
+  if (!remotePath) throw Object.assign(new Error('缺少文件路径'), { statusCode: 400 });
+
+  const stat = await statSshPath(remotePath);
+  if (stat.item.IsDir) {
+    return addSshFolderToLocalAria2(remotePath, stat.item, body);
+  }
+
+  const served = await ensureSshServedDirectory(stat.item.ParentPath);
+  const tunnel = await ensureSshTunnel(served.port);
+  const request = buildSshServedFileDownload({
+    stat: stat.item,
+    localPort: tunnel.localPort,
+    dir: body.dir,
+  });
+  await waitForHttpSource(request.url, 8000);
+  const gid = await aria2('aria2.addUri', request.params);
+
+  return {
+    ok: true,
+    route: 'ssh-rclone-serve',
+    gid,
+    sourceUrl: request.url,
+    sshHost: runtime.sshHost,
+    sourceBackend: served.backend,
+    servePort: served.port,
+    tunnelPort: tunnel.localPort,
+    expiresAt: new Date(Math.min(served.expiresAt, tunnel.expiresAt)).toISOString(),
+    out: request.options.out,
+    dir: request.options.dir || null,
+  };
+}
+
+async function addSshFolderToLocalAria2(remotePath, item, body) {
+  let summary;
+  let plan;
+  const planToken = typeof body.planToken === 'string' ? body.planToken : '';
+  const cached = body.confirmed
+    ? folderPlanCache.take(planToken, { remote: body.remote, remotePath })
+    : null;
+  if (cached) {
+    summary = cached.summary;
+    plan = cached.plan;
+  } else {
+    if (body.confirmed && planToken) {
+      throw Object.assign(new Error('目录下载计划已过期，请重新确认下载'), { statusCode: 409 });
+    }
+    summary = await summarizeSshFolder(remotePath);
+    plan = chooseFolderDownloadPlan(summary);
+  }
+  if (plan.requiresFullListing) {
+    throw Object.assign(new Error('目录文件列表过大，无法安全生成下载计划'), { statusCode: 400 });
+  }
+  if (plan.requiresConfirmation && !body.confirmed) {
+    const token = folderPlanCache.put({
+      remote: body.remote,
+      remotePath,
+      summary,
+      plan,
+    });
+    return {
+      ok: true,
+      requiresConfirmation: true,
+      planToken: token,
+      strategy: plan.strategy,
+      plan: publicFolderPlan(plan),
+      summary: publicFolderSummary(summary),
+    };
+  }
+
+  if (plan.strategy === 'archive-small-files') {
+    return addSshFolderArchiveToLocalAria2(summary, body, plan, plan.archive.files);
+  }
+  if (plan.strategy === 'mixed') {
+    return addSshFolderMixedToLocalAria2(summary, body, plan);
+  }
+  return addSshFolderFilesToLocalAria2(summary, body, plan.direct.files);
+}
+
+async function addSshFolderFilesToLocalAria2(summary, body, files = summary.files) {
+  if (!files?.length) {
+    throw Object.assign(new Error('文件夹内没有可下载文件'), { statusCode: 400 });
+  }
+
+  const served = await ensureSshServedDirectory(summary.item.AbsolutePath);
+  const tunnel = await ensureSshTunnel(served.port);
+  const origin = `http://127.0.0.1:${tunnel.localPort}`;
+  const firstUrl = `${origin}/${encodeRemotePath(files[0].RelPath)}`;
+  await waitForHttpSource(firstUrl, 8000);
+
+  const gids = [];
+  for (const file of files) {
+    const url = `${origin}/${encodeRemotePath(file.RelPath)}`;
+    const options = folderFileAria2Options(
+      safeAria2RelativeOut(joinRemotePath(summary.item.Name, file.RelPath)),
+      body.dir,
+    );
+    const gid = await aria2('aria2.addUri', [[url], options]);
+    gids.push(gid);
+  }
+
+  return {
+    ok: true,
+    route: 'ssh-folder-files',
+    strategy: 'files',
+    gids,
+    count: gids.length,
+    summary: publicFolderSummary(summary),
+    sshHost: runtime.sshHost,
+    sourceBackend: served.backend,
+    servePort: served.port,
+    tunnelPort: tunnel.localPort,
+    expiresAt: new Date(Math.min(served.expiresAt, tunnel.expiresAt)).toISOString(),
+  };
+}
+
+async function addSshFolderMixedToLocalAria2(summary, body, plan) {
+  const results = {};
+  for (const batch of getFolderDownloadWorkOrder(plan)) {
+    if (batch === 'archive') {
+      results.archive = await addSshFolderArchiveToLocalAria2(summary, body, plan, plan.archive.files);
+    }
+    if (batch === 'direct') {
+      results.direct = await addSshFolderFilesToLocalAria2(summary, body, plan.direct.files);
+    }
+  }
+
+  return {
+    ok: true,
+    route: 'ssh-folder-mixed',
+    strategy: 'mixed',
+    plan: publicFolderPlan(plan),
+    summary: publicFolderSummary(summary),
+    direct: results.direct || null,
+    archive: results.archive || null,
+    count: Number(results.direct?.count || 0) + Number(results.archive?.gid ? 1 : 0),
+  };
+}
+
+async function addSshFolderArchiveToLocalAria2(summary, body, plan, files = summary.files) {
+  if (!files?.length) {
+    throw Object.assign(new Error('没有可打包的小文件'), { statusCode: 400 });
+  }
+  const compression = body.compression === 'gzip' ? 'gzip' : 'none';
+  const archive = await createSshFolderArchive(summary.item, compression, files);
+  const served = await ensureSshServedDirectory(path.posix.dirname(archive.remotePath));
+  const tunnel = await ensureSshTunnel(served.port);
+  const url = `http://127.0.0.1:${tunnel.localPort}/${encodeRemotePath(path.posix.basename(archive.remotePath))}`;
+  await waitForHttpSource(url, 8000);
+  const options = folderFileAria2Options(archive.fileName, body.dir || runtime.aria2Dir);
+  const gid = await aria2('aria2.addUri', [[url], options]);
+  await rememberPostDownloadJob(gid, {
+    type: 'extract-archive',
+    gid,
+    archiveFileName: archive.fileName,
+    remoteArchivePath: archive.remotePath,
+    extractDir: options.dir || null,
+    createdAt: Date.now(),
+    status: 'waiting',
+  });
+
+  return {
+    ok: true,
+    route: 'ssh-folder-archive',
+    strategy: 'archive',
+    gid,
+    plan: publicFolderPlan(plan),
+    summary: publicFolderSummary(summary),
+    compression,
+    sourceUrl: url,
+    sshHost: runtime.sshHost,
+    sourceBackend: served.backend,
+    servePort: served.port,
+    tunnelPort: tunnel.localPort,
+    expiresAt: new Date(Math.min(served.expiresAt, tunnel.expiresAt)).toISOString(),
+    out: options.out,
+    dir: options.dir || null,
+    postAction: 'extract-delete-archive',
+  };
+}
+
+async function addRcloneFileToLocalAria2(body) {
+  const remote = assertRemote(body.remote);
+  const remotePath = normalizeRemotePath(body.path || '');
+  if (!remotePath) throw Object.assign(new Error('缺少文件路径'), { statusCode: 400 });
+
+  const stat = await rcloneRc('operations/stat', {
+    fs: `${remote}:`,
+    remote: remotePath,
+    opt: { filesOnly: true },
+  });
+  if (!stat.item || stat.item.IsDir) {
+    throw Object.assign(new Error('只能下载文件'), { statusCode: 400 });
+  }
+
+  const served = await ensureServedRemote(remote, '127.0.0.1');
+  const request = buildLocalAria2Download({
+    servedOrigin: served.origin,
+    remotePath,
+    item: stat.item,
+    dir: body.dir,
+  });
+  const gid = await aria2('aria2.addUri', request.params);
+
+  return {
+    ok: true,
+    route: 'local-aria2',
+    gid,
+    sourceUrl: redactUrl(request.url),
+    servePort: served.port,
+    expiresAt: new Date(served.expiresAt).toISOString(),
+    out: request.options.out,
+    dir: request.options.dir || null,
+  };
 }
 
 async function sendToPeer(body) {
@@ -584,6 +943,440 @@ async function copySmallFileWithRsync(remote, remotePath, body) {
     destination: target,
     output: result.stdout.slice(-4000),
   };
+}
+
+function isSshRemote(remote) {
+  return remote === runtime.sshRemoteName;
+}
+
+async function listSshFiles(remotePath) {
+  return runSshPythonJson('list', normalizeSshRemotePath(remotePath));
+}
+
+async function statSshPath(remotePath) {
+  return runSshPythonJson('stat', normalizeSshRemotePath(remotePath));
+}
+
+async function summarizeSshFolder(remotePath) {
+  return runSshPythonJson('summary', normalizeSshRemotePath(remotePath));
+}
+
+async function runSshPythonJson(mode, remotePath) {
+  const root = encodeSshPythonArg(runtime.sshRoot);
+  const requested = encodeSshRemotePath(remotePath);
+  const result = await runCommand(
+    runtime.sshCommand,
+    sshBaseArgs('python3', '-', root, requested, mode),
+    {
+      input: sshFsScript(),
+      timeoutMs: mode === 'summary' ? 120000 : 20000,
+    },
+  );
+  try {
+    return JSON.parse(result.stdout);
+  } catch (error) {
+    throw Object.assign(new Error('服务器返回的文件列表不是合法 JSON'), {
+      statusCode: 502,
+      detail: JSON.stringify({
+        mode,
+        remotePath,
+        parseError: error.message,
+        stdoutLength: result.stdout.length,
+        stdoutHead: result.stdout.slice(0, 500),
+        stdoutTail: result.stdout.slice(-500),
+      }),
+    });
+  }
+}
+
+async function ensureSshServedDirectory(directory) {
+  const key = `${runtime.sshHost}|${directory}`;
+  const existing = sshServedDirectories.get(key);
+  if (existing && existing.expiresAt > Date.now()) {
+    existing.expiresAt = Date.now() + serveTtlMs;
+    return existing;
+  }
+
+  const portNumber = await pickRemoteServePort();
+  const rcloneArgs = buildRcloneServeArgs({ directory, port: portNumber });
+  const logPath = `/tmp/lan-transfer-rclone-${crypto
+    .createHash('sha256')
+    .update(`${key}|${portNumber}`)
+    .digest('hex')
+    .slice(0, 16)}.log`;
+  const helperPath = `/tmp/lan-transfer-range-${crypto
+    .createHash('sha256')
+    .update(`${directory}|${portNumber}`)
+    .digest('hex')
+    .slice(0, 16)}.py`;
+  const commandLine = ['rclone', ...rcloneArgs].map(shellQuote).join(' ');
+  const script = [
+    'set -eu',
+    'if command -v rclone >/dev/null 2>&1; then',
+    `nohup ${commandLine} > ${shellQuote(logPath)} 2>&1 < /dev/null &`,
+    'echo rclone:$!',
+    'else',
+    buildPythonRangeServeScript({
+      helperPath,
+      directory,
+      port: portNumber,
+      logPath,
+    }),
+    'fi',
+  ].join('\n');
+  const result = await runCommand(runtime.sshCommand, sshBaseArgs('sh', '-s'), {
+    input: script,
+    timeoutMs: 10000,
+  });
+  const match = result.stdout.trim().match(/(rclone|python):(\d+)/);
+  const backend = match?.[1] || 'unknown';
+  const pid = Number(match?.[2]);
+  if (!Number.isInteger(pid) || pid <= 0) {
+    throw Object.assign(new Error('服务器 HTTP 下载源启动失败'), {
+      statusCode: 502,
+      detail: result.stdout,
+    });
+  }
+
+  const served = {
+    host: runtime.sshHost,
+    directory,
+    port: portNumber,
+    pid,
+    backend,
+    logPath,
+    expiresAt: Date.now() + serveTtlMs,
+  };
+  sshServedDirectories.set(key, served);
+  return served;
+}
+
+async function ensureSshTunnel(remotePort) {
+  const key = `${runtime.sshHost}|${remotePort}`;
+  const existing = sshTunnels.get(key);
+  if (existing && existing.child.exitCode === null) {
+    existing.expiresAt = Date.now() + serveTtlMs;
+    return existing;
+  }
+
+  const localPort = await allocatePort('127.0.0.1');
+  const args = buildSshTunnelArgs({
+    host: runtime.sshHost,
+    localPort,
+    remotePort,
+  });
+  const child = spawn(runtime.sshCommand, args, { stdio: ['ignore', 'ignore', 'pipe'] });
+  child.stderr.on('data', (chunk) => {
+    console.error(`ssh tunnel ${runtime.sshHost}:${remotePort}: ${chunk.toString().trim()}`);
+  });
+  child.on('exit', () => {
+    const current = sshTunnels.get(key);
+    if (current?.child === child) sshTunnels.delete(key);
+  });
+  await waitForTcp('127.0.0.1', localPort, 5000);
+
+  const tunnel = {
+    child,
+    host: runtime.sshHost,
+    remotePort,
+    localPort,
+    expiresAt: Date.now() + serveTtlMs,
+  };
+  sshTunnels.set(key, tunnel);
+  return tunnel;
+}
+
+async function createSshFolderArchive(item, compression, files = []) {
+  const archiveBase = `${safeArchiveBaseName(item.Name)}-${Date.now().toString(36)}-${crypto
+    .randomBytes(3)
+    .toString('hex')}`;
+  const extension = compression === 'gzip' ? 'tar.gz' : 'tar';
+  const fileName = `${archiveBase}.${extension}`;
+  const remotePath = `/tmp/${fileName}`;
+  const listPath = `/tmp/${archiveBase}.files`;
+  const script = buildSshArchiveScript({
+    parentPath: item.ParentPath,
+    folderName: item.Name,
+    remotePath,
+    listPath,
+    compression,
+    files,
+  });
+  const result = await runCommand(runtime.sshCommand, sshBaseArgs('sh', '-s'), {
+    input: script,
+    timeoutMs: 30 * 60 * 1000,
+  });
+  const size = Number(result.stdout.trim().split(/\s+/).pop() || 0);
+  return {
+    fileName,
+    remotePath,
+    compression,
+    size,
+  };
+}
+
+async function rememberPostDownloadJob(gid, job) {
+  postDownloadJobs.set(gid, job);
+  await persistPostDownloadJobs();
+}
+
+async function forgetPostDownloadJob(gid) {
+  postDownloadJobs.delete(gid);
+  await persistPostDownloadJobs();
+}
+
+async function persistPostDownloadJobs() {
+  await savePostDownloadJobs(postDownloadStorePath, postDownloadJobs).catch((error) => {
+    console.error(`post job store: ${error.message}`);
+  });
+}
+
+async function monitorPostDownloadJobs() {
+  if (postDownloadMonitorRunning || !postDownloadJobs.size) return;
+  postDownloadMonitorRunning = true;
+  try {
+    for (const [gid, job] of postDownloadJobs) {
+      if (job.status === 'error') continue;
+      if (job.status === 'running') continue;
+      const task = await aria2('aria2.tellStatus', [
+        gid,
+        ['gid', 'status', 'dir', 'files', 'errorMessage'],
+      ]).catch((error) => {
+        console.error(`post job ${gid}: ${error.message}`);
+        return null;
+      });
+      if (!task) continue;
+      if (task.status === 'error' || task.status === 'removed') {
+        job.status = task.status;
+        job.errorMessage = task.errorMessage || task.status;
+        await persistPostDownloadJobs();
+        continue;
+      }
+      if (task.status !== 'complete') continue;
+      job.status = 'running';
+      delete job.errorMessage;
+      await persistPostDownloadJobs();
+      await runArchivePostAction(job, task).catch((error) => {
+        job.status = 'error';
+        job.errorMessage = error.message;
+        console.error(`post job ${gid}: ${error.message}`);
+      });
+      if (job.status !== 'error') {
+        await forgetPostDownloadJob(gid);
+      } else {
+        await persistPostDownloadJobs();
+      }
+    }
+  } finally {
+    postDownloadMonitorRunning = false;
+  }
+}
+
+async function runArchivePostAction(job, task) {
+  const firstFile = task.files?.[0];
+  const archivePath = firstFile?.path || path.join(job.extractDir || task.dir || '', job.archiveFileName);
+  if (!archivePath) throw new Error('找不到本地归档文件路径');
+  const extractDir = job.extractDir || task.dir || path.dirname(archivePath);
+  await fsp.mkdir(extractDir, { recursive: true });
+  await runCommand('tar', ['-xf', archivePath, '-C', extractDir], {
+    timeoutMs: 60 * 60 * 1000,
+  });
+  await fsp.rm(archivePath, { force: true });
+  if (job.remoteArchivePath) {
+    await runCommand(runtime.sshCommand, sshBaseArgs('rm', '-f', job.remoteArchivePath), {
+      timeoutMs: 10000,
+    }).catch((error) => {
+      console.error(`remote archive cleanup: ${error.message}`);
+    });
+  }
+}
+
+function stopSshServedDirectory(key) {
+  const served = sshServedDirectories.get(key);
+  if (!served) return;
+  sshServedDirectories.delete(key);
+  if (Number.isInteger(served.pid) && served.pid > 0) {
+    runCommand(runtime.sshCommand, sshBaseArgs('kill', String(served.pid)), { timeoutMs: 5000 }).catch(
+      () => {},
+    );
+  }
+}
+
+function stopSshTunnel(key) {
+  const tunnel = sshTunnels.get(key);
+  if (!tunnel) return;
+  tunnel.child.kill('SIGTERM');
+  sshTunnels.delete(key);
+}
+
+async function pickRemoteServePort() {
+  if (process.env.SSH_REMOTE_PORT) return Number(process.env.SSH_REMOTE_PORT);
+  return 18000 + crypto.randomInt(20000);
+}
+
+async function waitForHttpSource(url, timeoutMs) {
+  const started = Date.now();
+  while (Date.now() - started < timeoutMs) {
+    try {
+      const response = await fetch(url, { method: 'HEAD' });
+      if (response.ok) return;
+    } catch {
+      // Retry until the SSH tunnel and server-side rclone have both opened.
+    }
+    await new Promise((resolve) => setTimeout(resolve, 200));
+  }
+  throw Object.assign(new Error('服务器 HTTP 下载源启动超时'), { statusCode: 502 });
+}
+
+function sshBaseArgs(...remoteArgs) {
+  return ['-o', 'BatchMode=yes', runtime.sshHost, ...remoteArgs];
+}
+
+function shellQuote(value) {
+  return `'${String(value).replaceAll("'", "'\"'\"'")}'`;
+}
+
+function sshFsScript() {
+  return `
+import base64
+import datetime
+import json
+import mimetypes
+import os
+import pathlib
+import sys
+
+def decode(value):
+    return base64.b64decode(value.encode("ascii")).decode("utf-8")
+
+root = pathlib.Path(decode(sys.argv[1])).expanduser().resolve()
+requested = decode(sys.argv[2])
+mode = sys.argv[3]
+
+def resolve_target(value):
+    if value.startswith("/"):
+        target = pathlib.Path(value).expanduser().resolve()
+    else:
+        target = (root / value).resolve()
+        try:
+            common = os.path.commonpath([str(root), str(target)])
+        except ValueError:
+            raise SystemExit("path is outside root")
+        if common != str(root):
+            raise SystemExit("path is outside root")
+    return target
+
+def item_for(target):
+    st = target.stat()
+    try:
+        common = os.path.commonpath([str(root), str(target)])
+    except ValueError:
+        common = ""
+    if common == str(root):
+        rel = os.path.relpath(target, root)
+        if rel == ".":
+            rel = ""
+        rel = rel.replace(os.sep, "/")
+    else:
+        rel = str(target)
+    is_dir = target.is_dir()
+    return {
+        "Name": target.name if rel else root.name,
+        "Path": rel,
+        "IsDir": is_dir,
+        "Size": 0 if is_dir else st.st_size,
+        "ModTime": datetime.datetime.fromtimestamp(st.st_mtime, datetime.timezone.utc).isoformat().replace("+00:00", "Z"),
+        "MimeType": "" if is_dir else (mimetypes.guess_type(target.name)[0] or ""),
+        "ParentPath": str(target.parent),
+        "AbsolutePath": str(target),
+    }
+
+def list_items(target):
+    items = []
+    for child in target.iterdir():
+        try:
+            items.append(item_for(child))
+        except OSError:
+            continue
+    return items
+
+target = resolve_target(requested)
+if mode == "stat":
+    print(json.dumps({"item": item_for(target)}, ensure_ascii=False))
+elif mode == "list":
+    if not target.is_dir():
+        raise SystemExit("path is not a directory")
+    print(json.dumps({"list": list_items(target)}, ensure_ascii=False))
+elif mode == "summary":
+    if not target.is_dir():
+        raise SystemExit("path is not a directory")
+    files = []
+    file_count = 0
+    dir_count = 0
+    total_size = 0
+    for current, dirs, names in os.walk(target):
+        dir_count += len(dirs)
+        for name in names:
+            file_path = pathlib.Path(current) / name
+            try:
+                st = file_path.stat()
+            except OSError:
+                continue
+            if not file_path.is_file():
+                continue
+            file_count += 1
+            total_size += st.st_size
+            rel = os.path.relpath(file_path, target).replace(os.sep, "/")
+            files.append({
+                "Name": file_path.name,
+                "RelPath": rel,
+                "Size": st.st_size,
+                "ModTime": datetime.datetime.fromtimestamp(st.st_mtime, datetime.timezone.utc).isoformat().replace("+00:00", "Z"),
+                "MimeType": mimetypes.guess_type(file_path.name)[0] or "",
+                "AbsolutePath": str(file_path),
+            })
+    print(json.dumps({
+        "item": item_for(target),
+        "fileCount": file_count,
+        "dirCount": dir_count,
+        "totalSize": total_size,
+        "files": files,
+        "filesTruncated": False,
+    }, ensure_ascii=False))
+else:
+    raise SystemExit("unsupported mode")
+`;
+}
+
+function sshCatScript() {
+  return `
+import base64
+import os
+import pathlib
+import shutil
+import sys
+
+def decode(value):
+    return base64.b64decode(value.encode("ascii")).decode("utf-8")
+
+root = pathlib.Path(decode(sys.argv[1])).expanduser().resolve()
+requested = decode(sys.argv[2])
+target = (root / requested).resolve()
+if requested.startswith("/"):
+    target = pathlib.Path(requested).expanduser().resolve()
+else:
+    target = (root / requested).resolve()
+    try:
+        common = os.path.commonpath([str(root), str(target)])
+    except ValueError:
+        raise SystemExit("path is outside root")
+    if common != str(root):
+        raise SystemExit("path is outside root")
+if not target.is_file():
+    raise SystemExit("path is not a file")
+with target.open("rb") as source:
+    shutil.copyfileobj(source, sys.stdout.buffer)
+`;
 }
 
 async function ensureServedRemote(remote, host) {
@@ -699,36 +1492,79 @@ async function localPathForRemote(remote, remotePath) {
   return candidate;
 }
 
-function runCommand(command, args) {
+function runCommand(command, args, options = {}) {
   return new Promise((resolve, reject) => {
-    const child = spawn(command, args, { stdio: ['ignore', 'pipe', 'pipe'] });
+    const child = spawn(command, args, {
+      stdio: options.input === undefined ? ['ignore', 'pipe', 'pipe'] : ['pipe', 'pipe', 'pipe'],
+    });
     let stdout = '';
     let stderr = '';
+    let timer = null;
+    const done = once((error, result) => {
+      if (timer) clearTimeout(timer);
+      if (error) reject(error);
+      else resolve(result);
+    });
+    if (options.timeoutMs) {
+      timer = setTimeout(() => {
+        child.kill('SIGTERM');
+        done(
+          Object.assign(new Error(`${command} timed out after ${options.timeoutMs}ms`), {
+            statusCode: 502,
+          }),
+        );
+      }, options.timeoutMs);
+    }
     child.stdout.on('data', (chunk) => {
       stdout += chunk.toString();
     });
     child.stderr.on('data', (chunk) => {
       stderr += chunk.toString();
     });
-    child.on('error', reject);
+    child.on('error', (error) => done(error));
     child.on('close', (code) => {
       if (code === 0) {
-        resolve({ stdout, stderr });
+        done(null, { stdout, stderr });
       } else {
-        reject(
+        done(
           Object.assign(new Error(stderr.trim() || stdout.trim() || `${command} exited with ${code}`), {
             statusCode: 502,
           }),
         );
       }
     });
+    if (options.input !== undefined) {
+      child.stdin.end(options.input);
+    }
   });
 }
 
 async function handleDownload(req, res, requestUrl) {
   const remote = assertRemote(requestUrl.searchParams.get('remote'));
-  const remotePath = normalizeRemotePath(requestUrl.searchParams.get('path') || '');
+  const remotePath = isSshRemote(remote)
+    ? normalizeSshRemotePath(requestUrl.searchParams.get('path') || '')
+    : normalizeRemotePath(requestUrl.searchParams.get('path') || '');
   if (!remotePath) throw Object.assign(new Error('缺少文件路径'), { statusCode: 400 });
+
+  await handleDownloadForRemotePath(req, res, remote, remotePath);
+}
+
+async function handleDownloadWithToken(req, res, requestUrl) {
+  const token = String(requestUrl.searchParams.get('downloadToken') || '');
+  const download = downloadTokens.get(token);
+  if (!download || download.expiresAt <= Date.now()) {
+    downloadTokens.delete(token);
+    throw Object.assign(new Error('下载 token 已失效'), { statusCode: 401 });
+  }
+  downloadTokens.delete(token);
+  await handleDownloadForRemotePath(req, res, download.remote, download.path);
+}
+
+async function handleDownloadForRemotePath(req, res, remote, remotePath) {
+  if (isSshRemote(remote)) {
+    await handleSshDownload(req, res, remotePath);
+    return;
+  }
 
   const stat = await rcloneRc('operations/stat', {
     fs: `${remote}:`,
@@ -759,10 +1595,46 @@ async function handleDownload(req, res, requestUrl) {
   child.on('error', (error) => res.destroy(error));
 }
 
+async function handleSshDownload(req, res, remotePath) {
+  const stat = await statSshPath(remotePath);
+  if (!stat.item || stat.item.IsDir) {
+    throw Object.assign(new Error('只能下载文件'), { statusCode: 400 });
+  }
+
+  const root = encodeSshPythonArg(runtime.sshRoot);
+  const requested = encodeSshRemotePath(remotePath);
+  const child = spawn(runtime.sshCommand, sshBaseArgs('python3', '-', root, requested), {
+    stdio: ['pipe', 'pipe', 'pipe'],
+  });
+  child.stdin.end(sshCatScript());
+
+  const filename = encodeURIComponent(stat.item.Name || path.posix.basename(remotePath));
+  res.writeHead(200, {
+    'Content-Type': stat.item.MimeType || 'application/octet-stream',
+    'Content-Length': stat.item.Size,
+    'Content-Disposition': `attachment; filename*=UTF-8''${filename}`,
+    'Cache-Control': 'no-store',
+  });
+
+  child.stdout.pipe(res);
+  child.stderr.on('data', (chunk) => {
+    console.error(`ssh cat ${runtime.sshHost}: ${chunk.toString().trim()}`);
+  });
+  req.on('close', () => child.kill('SIGTERM'));
+  child.on('error', (error) => res.destroy(error));
+}
+
 async function handleDownloadFolder(req, res, requestUrl) {
   const remote = assertRemote(requestUrl.searchParams.get('remote'));
-  const remotePath = normalizeRemotePath(requestUrl.searchParams.get('path') || '');
+  const remotePath = isSshRemote(remote)
+    ? normalizeSshRemotePath(requestUrl.searchParams.get('path') || '')
+    : normalizeRemotePath(requestUrl.searchParams.get('path') || '');
   if (!remotePath) throw Object.assign(new Error('缺少文件夹路径'), { statusCode: 400 });
+
+  if (isSshRemote(remote)) {
+    await handleSshDownloadFolder(req, res, remotePath);
+    return;
+  }
 
   const stat = await rcloneRc('operations/stat', {
     fs: `${remote}:`,
@@ -817,6 +1689,46 @@ async function handleDownloadFolder(req, res, requestUrl) {
     }
     throw error;
   }
+}
+
+async function handleSshDownloadFolder(req, res, remotePath) {
+  const summary = await summarizeSshFolder(remotePath);
+  if (!summary.item?.IsDir) {
+    throw Object.assign(new Error('只能打包下载文件夹'), { statusCode: 400 });
+  }
+  if (!summary.files?.length) {
+    throw Object.assign(new Error('文件夹内没有可下载文件'), { statusCode: 400 });
+  }
+
+  const archive = await createSshFolderArchive(summary.item, 'gzip', summary.files);
+  const served = await ensureSshServedDirectory(path.posix.dirname(archive.remotePath));
+  const tunnel = await ensureSshTunnel(served.port);
+  const url = `http://127.0.0.1:${tunnel.localPort}/${encodeRemotePath(path.posix.basename(archive.remotePath))}`;
+  await waitForHttpSource(url, 8000);
+
+  const response = await fetch(url);
+  if (!response.ok || !response.body) {
+    throw Object.assign(new Error('服务器归档下载源不可用'), { statusCode: 502 });
+  }
+
+  const filename = encodeURIComponent(archive.fileName);
+  res.writeHead(200, {
+    'Content-Type': 'application/gzip',
+    ...(archive.size ? { 'Content-Length': archive.size } : {}),
+    'Content-Disposition': `attachment; filename*=UTF-8''${filename}`,
+    'Cache-Control': 'no-store',
+  });
+
+  const cleanup = once(() => {
+    runCommand(runtime.sshCommand, sshBaseArgs('rm', '-f', archive.remotePath), {
+      timeoutMs: 10000,
+    }).catch((error) => {
+      console.error(`remote archive cleanup: ${error.message}`);
+    });
+  });
+  req.on('close', cleanup);
+  res.on('finish', cleanup);
+  Readable.fromWeb(response.body).on('error', (error) => res.destroy(error)).pipe(res);
 }
 
 async function handleUpload(req, res, requestUrl) {
@@ -942,6 +1854,47 @@ function safeArchiveBaseName(value) {
     .trim()
     .slice(0, 96);
   return cleaned || 'folder';
+}
+
+function folderFileAria2Options(out, dir) {
+  const options = {
+    out,
+    continue: 'true',
+    split: '16',
+    'max-connection-per-server': '16',
+    'min-split-size': '20M',
+    'auto-file-renaming': 'false',
+    'allow-overwrite': 'false',
+  };
+  if (dir) options.dir = String(dir);
+  return options;
+}
+
+function safeAria2RelativeOut(value) {
+  const normalized = normalizeRemotePath(value);
+  const cleaned = normalized
+    .split('/')
+    .map((segment) =>
+      segment
+        .replace(/[\\/:*?"<>|\x00-\x1f]/g, '_')
+        .replace(/^\.+$/, '_')
+        .trim(),
+    )
+    .filter(Boolean)
+    .join('/');
+  if (!cleaned) throw Object.assign(new Error('输出路径不合法'), { statusCode: 400 });
+  return cleaned.slice(0, 240);
+}
+
+function publicFolderSummary(summary) {
+  return {
+    name: summary.item?.Name || '',
+    path: summary.item?.Path || '',
+    fileCount: Number(summary.fileCount || 0),
+    dirCount: Number(summary.dirCount || 0),
+    totalSize: Number(summary.totalSize || 0),
+    filesTruncated: Boolean(summary.filesTruncated),
+  };
 }
 
 function once(fn) {
