@@ -19,5 +19,12 @@
         "minHeight": 560
       }
     ]
+  },
+  "bundle": {
+    "active": true,
+    "targets": ["nsis"],
+    "icon": [
+      "icons/icon.ico"
+    ]
   }
 }
