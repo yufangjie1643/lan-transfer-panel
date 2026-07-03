@@ -1,9 +1,8 @@
-import { useCallback, useEffect, useMemo, useState } from 'react';
-import { PanelApiClient } from './api/client';
+import { useCallback, useEffect, useState } from 'react';
 import type { DownloadTasksResponse } from './api/types';
 import { QueuePanel } from './features/queue/QueuePanel';
+import { controlTransferTask, listTransferTasks } from './features/remote/sshRemote';
 import { defaultLocale, messages, type Locale } from './i18n/messages';
-import { useAppStore } from './state/useAppStore';
 
 const emptyTasks: DownloadTasksResponse = {
   globalStat: {},
@@ -16,19 +15,17 @@ export function QueueWindow() {
   const [tasks, setTasks] = useState<DownloadTasksResponse>(emptyTasks);
   const [locale, setLocale] = useState<Locale>(defaultLocale);
   const [error, setError] = useState<string | null>(null);
-  const backendUrl = useAppStore((state) => state.backendUrl);
-  const client = useMemo(() => new PanelApiClient(backendUrl), [backendUrl]);
   const text = messages[locale];
 
   const loadTasks = useCallback(async () => {
-    const nextTasks = await client.getTasks();
+    const nextTasks = await listTransferTasks();
     setTasks({
       globalStat: nextTasks.globalStat ?? {},
       active: Array.isArray(nextTasks.active) ? nextTasks.active : [],
       waiting: Array.isArray(nextTasks.waiting) ? nextTasks.waiting : [],
       stopped: Array.isArray(nextTasks.stopped) ? nextTasks.stopped : []
     });
-  }, [client]);
+  }, []);
 
   useEffect(() => {
     let canceled = false;
@@ -73,8 +70,7 @@ export function QueueWindow() {
         tasks={tasks}
         labels={text.queue}
         onControl={(gid, action) => {
-          client
-            .controlTask(gid, action)
+          controlTransferTask(gid, action)
             .then(loadTasks)
             .catch((controlError) => {
               setError(

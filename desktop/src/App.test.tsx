@@ -4,12 +4,13 @@ import { describe, expect, it } from 'vitest';
 import App from './App';
 
 describe('App shell', () => {
-  it('starts on the standalone login screen with the local panel server preset', () => {
+  it('starts on the standalone SSH login screen with the LAN server preset', () => {
     render(<App />);
 
     expect(screen.getByRole('main')).toHaveClass('login-shell');
     expect(screen.getByLabelText('连接配置')).toHaveValue('server-10-42-0-1');
-    expect(screen.getByLabelText('后端地址')).toHaveValue('http://localhost:5590');
+    expect(screen.getByLabelText('服务器地址')).toHaveValue('10.42.0.1');
+    expect(screen.getByLabelText('SSH 端口')).toHaveValue(2687);
     expect(screen.queryByLabelText('远端文件')).not.toBeInTheDocument();
   });
 

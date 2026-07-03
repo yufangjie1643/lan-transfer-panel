@@ -23,7 +23,9 @@ Windows 桌面客户端可直接调用本服务的 HTTP API。接口、认证 Co
 
 ## 桌面客户端
 
-桌面客户端位于 `desktop/`，技术栈为 Tauri v2、React、TypeScript 和 Rust。当前版本复用本 Node.js 后端，默认连接 `http://localhost:5590`。
+桌面客户端位于 `desktop/`，技术栈为 Tauri v2、React、TypeScript 和 Rust。登录页现在以 SSH 为入口：填写服务器地址、SSH 端口、用户名，以及密码或私钥路径。默认服务器配置是 `10.42.0.1:22` / `yufan`。
+
+可以保存多组服务器配置；配置文件位于 `%APPDATA%\LAN Transfer\ssh-profiles.json`。默认不保存密码或密钥密码，只有勾选“保存此服务器配置”时才会写入本地配置文件。
 
 ```powershell
 npm install
@@ -39,34 +41,20 @@ npm run desktop:test
 cargo check --manifest-path desktop/src-tauri/Cargo.toml
 ```
 
-### Windows 拖拽 Demo
+### 桌面端下载
 
-当前 demo 已接入 Windows OLE 虚拟文件拖拽：
+当前桌面端优先走 SSH 文件浏览和单文件下载：
 
-- 远程普通文件 `<= 128 MB`：从文件列表拖到桌面或 Explorer 时，Rust 原生层通过 `FileGroupDescriptorW/FileContents` 暴露虚拟文件，Explorer 会向本机后端一次性 token URL 拉取真实文件内容。
-- 远程普通文件 `> 128 MB`：为避免 demo 阶段一次性读入内存，拖拽会退回到“下载到...”同一条托管下载路径，由 aria2 负责下载。
-- 远程文件夹：仍走托管下载路径，保留目录统计、小文件打包、大文件直下、自动解压、本地归档删除和服务器临时归档删除。
+- 远程普通文件：点击“下载到...”或拖拽文件行后选择本地目录，桌面端调用系统 `scp` 下载到该目录。
+- 远程文件夹：文件夹拖拽已禁用，后续再接入目录下载策略。
+- 旧的 Windows OLE 虚拟文件拖拽 demo 已移除，避免和当前 SSH 下载路径混用。
 
 启动 demo：
 
 ```powershell
 cd E:\Code\lan-transfer-panel
-cargo tauri dev
+npm run desktop:dev
 ```
-
-可先单独检查后端链路：
-
-```powershell
-npm run demo:check
-```
-
-默认会登录本机面板，递归找一个 `<= 1 MB` 的远程文件，申请一次性虚拟拖拽 token，并通过该 token 下载真实内容。也可以指定测试文件：
-
-```powershell
-$env:DEMO_FILE="/home/yufan/.zshrc"; npm run demo:check
-```
-
-检查通过后，从桌面客户端远程文件列表拖同类小文件到桌面或 Explorer。当前 OLE 路径适合验证交互和真实内容落盘；大文件流式 `IStream` 和文件夹虚拟目录树是后续增强项。
 
 ## 环境变量
 

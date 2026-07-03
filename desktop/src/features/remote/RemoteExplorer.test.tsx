@@ -34,11 +34,16 @@ describe('RemoteExplorer', () => {
           tree: '远端目录树',
           details: '远端文件详情',
           refresh: '刷新远端文件',
+          path: '远程路径',
+          openPath: '打开路径',
           expandFolder: (name) => `展开 ${name}`,
           collapseFolder: (name) => `折叠 ${name}`
         }}
         treeNodes={treeNodes}
         currentPath="server:/"
+        pathValue="server:/"
+        onPathValueChange={() => undefined}
+        onPathSubmit={() => undefined}
         items={[
           { key: 'logs', name: 'logs', isDir: true },
           { key: 'logs_2.sqlite', name: 'logs_2.sqlite', isDir: false, size: 2048 }

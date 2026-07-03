@@ -7,29 +7,29 @@ import { messages } from '../../i18n/messages';
 const profiles: ConnectionProfile[] = [
   {
     id: 'server-10-42-0-1',
-    label: '本机面板 + 服务器 10.42.0.1',
-    backendUrl: 'http://localhost:5590',
-    username: 'rclone',
-    password: 'loaded-secret'
-  },
-  {
-    id: 'local-dev',
-    label: '本机开发 127.0.0.1',
-    backendUrl: 'http://localhost:5590',
-    username: 'admin',
-    password: ''
+    label: 'yufanssh',
+    host: '10.42.0.1',
+    port: 2687,
+    username: 'yufan',
+    authMethod: 'key',
+    privateKeyPath: 'C:\\Users\\admin\\.ssh\\id_ed25519_local',
+    password: '',
+    saveCredential: false
   },
   {
     id: 'custom',
     label: '自定义连接',
-    backendUrl: '',
+    host: '',
+    port: 22,
     username: '',
-    password: ''
+    authMethod: 'password',
+    password: '',
+    saveCredential: false
   }
 ];
 
 describe('LoginScreen', () => {
-  it('defaults to the local panel profile and submits loaded server credentials', () => {
+  it('defaults to the LAN server profile and submits loaded server credentials', () => {
     const onSubmit = vi.fn();
 
     render(
@@ -39,20 +39,30 @@ describe('LoginScreen', () => {
         isConnecting={false}
         error={null}
         onSubmit={onSubmit}
+        onSaveProfile={() => undefined}
+        onDeleteProfile={() => undefined}
       />
     );
 
     expect(screen.getByLabelText('连接配置')).toHaveValue('server-10-42-0-1');
-    expect(screen.getByLabelText('后端地址')).toHaveValue('http://localhost:5590');
-    expect(screen.getByLabelText('用户名')).toHaveValue('rclone');
-    expect(screen.getByLabelText('密码')).toHaveValue('loaded-secret');
+    expect(screen.getByLabelText('服务器地址')).toHaveValue('10.42.0.1');
+    expect(screen.getByLabelText('SSH 端口')).toHaveValue(2687);
+    expect(screen.getByLabelText('用户名')).toHaveValue('yufan');
+    expect(screen.getByLabelText('私钥路径')).toHaveValue('C:\\Users\\admin\\.ssh\\id_ed25519_local');
 
     fireEvent.click(screen.getByRole('button', { name: '连接' }));
 
     expect(onSubmit).toHaveBeenCalledWith({
-      backendUrl: 'http://localhost:5590',
-      username: 'rclone',
-      password: 'loaded-secret'
+      id: 'server-10-42-0-1',
+      label: 'yufanssh',
+      host: '10.42.0.1',
+      port: 2687,
+      username: 'yufan',
+      authMethod: 'key',
+      password: '',
+      privateKeyPath: 'C:\\Users\\admin\\.ssh\\id_ed25519_local',
+      passphrase: '',
+      saveCredential: false
     });
   });
 
@@ -64,15 +74,17 @@ describe('LoginScreen', () => {
         isConnecting={false}
         error={null}
         onSubmit={() => undefined}
+        onSaveProfile={() => undefined}
+        onDeleteProfile={() => undefined}
       />
     );
 
     fireEvent.change(screen.getByLabelText('连接配置'), { target: { value: 'custom' } });
-    fireEvent.change(screen.getByLabelText('后端地址'), {
-      target: { value: 'http://10.42.0.88:5590' }
+    fireEvent.change(screen.getByLabelText('服务器地址'), {
+      target: { value: '10.42.0.88' }
     });
 
-    expect(screen.getByLabelText('后端地址')).toHaveValue('http://10.42.0.88:5590');
+    expect(screen.getByLabelText('服务器地址')).toHaveValue('10.42.0.88');
     expect(screen.getByLabelText('用户名')).toHaveValue('');
   });
 });

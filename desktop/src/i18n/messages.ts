@@ -23,9 +23,24 @@ interface Messages {
     title: string;
     subtitle: string;
     profile: string;
-    backendUrl: string;
+    profileName: string;
+    host: string;
+    port: string;
     username: string;
+    authMethod: string;
     password: string;
+    passwordAuth: string;
+    keyAuth: string;
+    privateKeyPath: string;
+    passphrase: string;
+    saveCredential: string;
+    saveProfile: string;
+    deleteProfile: string;
+    advanced: string;
+    aria2Rpc: string;
+    aria2Secret: string;
+    remoteTempDir: string;
+    remoteDownloadService: string;
     connect: string;
     connecting: string;
   };
@@ -83,6 +98,9 @@ interface Messages {
     downloadTo: string;
     remotePath: string;
     openPath: string;
+    back: string;
+    forward: string;
+    parent: string;
     refresh: (title: string) => string;
     expandFolder: (name: string) => string;
     collapseFolder: (name: string) => string;
@@ -129,11 +147,26 @@ export const messages: Record<Locale, Messages> = {
     },
     login: {
       title: '连接服务器',
-      subtitle: '选择服务器凭证，或输入自定义连接。',
+      subtitle: '选择已保存的 SSH 凭证，或输入新的服务器连接。',
       profile: '连接配置',
-      backendUrl: '后端地址',
+      profileName: '配置名称',
+      host: '服务器地址',
+      port: 'SSH 端口',
       username: '用户名',
-      password: '密码',
+      authMethod: '认证方式',
+      password: '登录密码',
+      passwordAuth: '密码',
+      keyAuth: 'SSH 密钥',
+      privateKeyPath: '私钥路径',
+      passphrase: '密钥密码，可选',
+      saveCredential: '保存此服务器配置',
+      saveProfile: '保存配置',
+      deleteProfile: '删除配置',
+      advanced: '高级设置',
+      aria2Rpc: 'Windows aria2 RPC',
+      aria2Secret: 'aria2 密钥，可选',
+      remoteTempDir: '远程临时目录',
+      remoteDownloadService: '远程下载服务',
       connect: '连接',
       connecting: '连接中...'
     },
@@ -191,6 +224,9 @@ export const messages: Record<Locale, Messages> = {
       downloadTo: '下载到...',
       remotePath: '远程路径',
       openPath: '打开路径',
+      back: '后退',
+      forward: '前进',
+      parent: '上一级',
       refresh: (title) => `刷新${title}`,
       expandFolder: (name) => `展开 ${name}`,
       collapseFolder: (name) => `折叠 ${name}`
@@ -233,11 +269,26 @@ export const messages: Record<Locale, Messages> = {
     },
     login: {
       title: 'Connect to server',
-      subtitle: 'Choose saved server credentials or enter a custom connection.',
+      subtitle: 'Choose saved SSH credentials or enter a new server connection.',
       profile: 'Connection profile',
-      backendUrl: 'Backend URL',
+      profileName: 'Profile name',
+      host: 'Server address',
+      port: 'SSH port',
       username: 'Username',
-      password: 'Password',
+      authMethod: 'Authentication',
+      password: 'Login password',
+      passwordAuth: 'Password',
+      keyAuth: 'SSH key',
+      privateKeyPath: 'Private key path',
+      passphrase: 'Key passphrase, optional',
+      saveCredential: 'Save this server profile',
+      saveProfile: 'Save profile',
+      deleteProfile: 'Delete profile',
+      advanced: 'Advanced settings',
+      aria2Rpc: 'Windows aria2 RPC',
+      aria2Secret: 'aria2 secret, optional',
+      remoteTempDir: 'Remote temp directory',
+      remoteDownloadService: 'Remote download service',
       connect: 'Connect',
       connecting: 'Connecting...'
     },
@@ -295,6 +346,9 @@ export const messages: Record<Locale, Messages> = {
       downloadTo: 'Download to...',
       remotePath: 'Remote path',
       openPath: 'Open path',
+      back: 'Back',
+      forward: 'Forward',
+      parent: 'Up one level',
       refresh: (title) => `Refresh ${title}`,
       expandFolder: (name) => `Expand ${name}`,
       collapseFolder: (name) => `Collapse ${name}`

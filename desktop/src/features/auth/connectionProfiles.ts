@@ -1,52 +1,41 @@
 import { invoke } from '@tauri-apps/api/core';
 
+export type AuthMethod = 'password' | 'key';
+
 export interface ConnectionProfile {
   id: string;
   label: string;
-  backendUrl?: string;
-  host?: string;
-  port?: number;
+  host: string;
+  port: number;
   username: string;
-  password: string;
-  authMethod?: 'password' | 'key';
+  authMethod: AuthMethod;
+  password?: string;
   privateKeyPath?: string;
   passphrase?: string;
-  saveCredential?: boolean;
+  saveCredential: boolean;
 }
 
 export const defaultConnectionProfiles: ConnectionProfile[] = [
   {
     id: 'server-10-42-0-1',
-    label: '本机面板 + 服务器 10.42.0.1',
-    backendUrl: 'http://localhost:5590',
+    label: 'yufanssh',
     host: '10.42.0.1',
-    port: 22,
-    username: '',
+    port: 2687,
+    username: 'yufan',
+    authMethod: 'key',
     password: '',
-    authMethod: 'password',
-    saveCredential: true
-  },
-  {
-    id: 'local-dev',
-    label: '本机开发 127.0.0.1',
-    backendUrl: 'http://localhost:5590',
-    host: '127.0.0.1',
-    port: 22,
-    username: '',
-    password: '',
-    authMethod: 'password',
-    saveCredential: true
+    privateKeyPath: 'C:\\Users\\admin\\.ssh\\id_ed25519_local',
+    saveCredential: false
   },
   {
     id: 'custom',
     label: '自定义连接',
-    backendUrl: '',
     host: '',
     port: 22,
     username: '',
-    password: '',
     authMethod: 'password',
-    saveCredential: true
+    password: '',
+    saveCredential: false
   }
 ];
 

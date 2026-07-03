@@ -1,6 +1,7 @@
+use std::fs;
+use std::io::Read;
 use std::mem::ManuallyDrop;
 use std::mem::{size_of, zeroed};
-use std::io::Read;
 use std::sync::Mutex;
 
 use windows::core::{implement, Error, Result, PCWSTR};
@@ -23,20 +24,20 @@ use windows::Win32::UI::Shell::{FILEDESCRIPTORW, FD_ATTRIBUTES, FD_FILESIZE};
 
 const FILE_ATTRIBUTE_NORMAL: u32 = 0x80;
 
-pub fn start_virtual_download_drag(
+pub fn start_virtual_file_drag(
     name: String,
     remote_path: String,
-    download_url: String,
+    local_path: String,
     size: Option<u64>,
 ) -> std::result::Result<(), String> {
     let safe_name = safe_virtual_file_name(&name);
-    if download_url.trim().is_empty() {
-        return Err("download_url is required".to_string());
+    if local_path.trim().is_empty() {
+        return Err("local_path is required".to_string());
     }
 
     unsafe {
         OleInitialize(None).map_err(|err| format!("OleInitialize failed: {err}"))?;
-        let result = do_drag_drop(safe_name, remote_path, download_url, size);
+        let result = do_drag_drop(safe_name, remote_path, local_path, size);
         OleUninitialize();
         result.map_err(|err| format!("DoDragDrop failed: {err}"))
     }
@@ -45,10 +46,10 @@ pub fn start_virtual_download_drag(
 unsafe fn do_drag_drop(
     name: String,
     remote_path: String,
-    download_url: String,
+    local_path: String,
     size: Option<u64>,
 ) -> Result<()> {
-    let data_object: IDataObject = VirtualFileDataObject::new(name, remote_path, download_url, size).into();
+    let data_object: IDataObject = VirtualFileDataObject::new(name, remote_path, local_path, size).into();
     let drop_source: IDropSource = VirtualDropSource.into();
     let mut effect = DROPEFFECT(0);
     DoDragDrop(&data_object, &drop_source, DROPEFFECT_COPY, &mut effect).ok()
@@ -60,19 +61,19 @@ struct VirtualFileDataObject {
     file_contents_format: u16,
     name: String,
     remote_path: String,
-    download_url: String,
+    local_path: String,
     size: Option<u64>,
     content_cache: Mutex<Option<Vec<u8>>>,
 }
 
 impl VirtualFileDataObject {
-    unsafe fn new(name: String, remote_path: String, download_url: String, size: Option<u64>) -> Self {
+    unsafe fn new(name: String, remote_path: String, local_path: String, size: Option<u64>) -> Self {
         Self {
             file_descriptor_format: RegisterClipboardFormatW(PCWSTR(wide_null("FileGroupDescriptorW").as_ptr())) as u16,
             file_contents_format: RegisterClipboardFormatW(PCWSTR(wide_null("FileContents").as_ptr())) as u16,
             name,
             remote_path,
-            download_url,
+            local_path,
             size,
             content_cache: Mutex::new(None),
         }
@@ -105,10 +106,10 @@ impl VirtualFileDataObject {
     }
 
     unsafe fn file_contents_medium(&self) -> Result<STGMEDIUM> {
-        let content = self.download_content_cached().map_err(|message| {
+        let content = self.read_content_cached().map_err(|message| {
             Error::new(
                 windows::core::HRESULT(0x80004005_u32 as i32),
-                format!("download {} failed: {}", self.remote_path, message),
+                format!("read {} failed: {}", self.remote_path, message),
             )
         })?;
         let handle = GlobalAlloc(GMEM_MOVEABLE, content.len())?;
@@ -121,27 +122,15 @@ impl VirtualFileDataObject {
         Ok(hglobal_medium(handle))
     }
 
-    fn download_content_cached(&self) -> std::result::Result<Vec<u8>, String> {
+    fn read_content_cached(&self) -> std::result::Result<Vec<u8>, String> {
         let mut cache = self.content_cache.lock().map_err(|err| err.to_string())?;
         if let Some(content) = cache.as_ref() {
             return Ok(content.clone());
         }
-        let content = self.download_content()?;
-        *cache = Some(content.clone());
-        Ok(content)
-    }
-
-    fn download_content(&self) -> std::result::Result<Vec<u8>, String> {
-        let response = ureq::get(&self.download_url)
-            .timeout(std::time::Duration::from_secs(60 * 60))
-            .call()
-            .map_err(|err| err.to_string())?;
-        if !(200..300).contains(&response.status()) {
-            return Err(format!("HTTP {}", response.status()));
-        }
-        let mut reader = response.into_reader();
+        let mut file = fs::File::open(&self.local_path).map_err(|err| err.to_string())?;
         let mut bytes = Vec::new();
-        reader.read_to_end(&mut bytes).map_err(|err| err.to_string())?;
+        file.read_to_end(&mut bytes).map_err(|err| err.to_string())?;
+        *cache = Some(bytes.clone());
         Ok(bytes)
     }
 }

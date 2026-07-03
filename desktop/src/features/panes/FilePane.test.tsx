@@ -92,73 +92,10 @@ describe('FilePane', () => {
       'application/x-lan-transfer-remote-path',
       JSON.stringify({ key: '/mnt/data/Ironman.txt', name: 'Ironman.txt', isDir: false })
     );
-    expect(dataTransfer.setData).not.toHaveBeenCalledWith('DownloadURL', expect.any(String));
     expect(onDragDownload).toHaveBeenCalledWith('/mnt/data/Ironman.txt');
   });
 
-  it('does not start managed download when native drag handles the item', () => {
-    const onDragDownload = vi.fn();
-    const onNativeDragStart = vi.fn(() => true);
-    const dataTransfer = {
-      effectAllowed: '',
-      setData: vi.fn()
-    };
-
-    render(
-      <FilePane
-        title="远端文件"
-        path="/home"
-        items={[{
-          key: '/mnt/data/Ironman.txt',
-          name: 'Ironman.txt',
-          isDir: false,
-          size: 12
-        }]}
-        selectedKeys={new Set()}
-        onSelect={() => undefined}
-        onOpenDirectory={() => undefined}
-        onRefresh={() => undefined}
-        onDragDownload={onDragDownload}
-        onNativeDragStart={onNativeDragStart}
-      />
-    );
-
-    const row = screen.getByText('Ironman.txt').closest('.file-row');
-    fireEvent.dragStart(row!, { dataTransfer });
-    fireEvent.dragEnd(row!);
-
-    expect(onNativeDragStart).toHaveBeenCalledWith('/mnt/data/Ironman.txt');
-    expect(onDragDownload).not.toHaveBeenCalled();
-  });
-
-  it('prepares native drag on left mouse down', () => {
-    const onPrepareNativeDrag = vi.fn();
-
-    render(
-      <FilePane
-        title="远端文件"
-        path="/home"
-        items={[{
-          key: '/mnt/data/Ironman.txt',
-          name: 'Ironman.txt',
-          isDir: false,
-          size: 12
-        }]}
-        selectedKeys={new Set()}
-        onSelect={() => undefined}
-        onOpenDirectory={() => undefined}
-        onRefresh={() => undefined}
-        onDragDownload={() => undefined}
-        onPrepareNativeDrag={onPrepareNativeDrag}
-      />
-    );
-
-    fireEvent.mouseDown(screen.getByText('Ironman.txt').closest('.file-row')!, { button: 0 });
-
-    expect(onPrepareNativeDrag).toHaveBeenCalledWith('/mnt/data/Ironman.txt');
-  });
-
-  it('starts the managed folder download flow when a folder is dragged out', () => {
+  it('does not allow folder drag downloads', () => {
     const onDragDownload = vi.fn();
     const dataTransfer = {
       effectAllowed: '',
@@ -183,11 +120,12 @@ describe('FilePane', () => {
     );
 
     const row = screen.getByText('test').closest('.file-row');
+    expect(row).toHaveAttribute('draggable', 'false');
     fireEvent.dragStart(row!, { dataTransfer });
     fireEvent.dragEnd(row!);
 
-    expect(dataTransfer.setData).not.toHaveBeenCalledWith('DownloadURL', expect.any(String));
-    expect(onDragDownload).toHaveBeenCalledWith('/mnt/data/test');
+    expect(dataTransfer.setData).not.toHaveBeenCalled();
+    expect(onDragDownload).not.toHaveBeenCalled();
   });
 
   it('preserves hidden file names in drag metadata', () => {

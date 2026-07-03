@@ -1,5 +1,6 @@
 import { FolderTree, type FolderTreeNode } from '../local/FolderTree';
 import { FilePane, type PaneItem } from '../panes/FilePane';
+import { ArrowLeft, ArrowRight, ArrowUp, RefreshCcw } from 'lucide-react';
 
 interface RemoteExplorerLabels {
   title: string;
@@ -8,6 +9,9 @@ interface RemoteExplorerLabels {
   refresh: string;
   path: string;
   openPath: string;
+  back?: string;
+  forward?: string;
+  parent?: string;
   expandFolder: (name: string) => string;
   collapseFolder: (name: string) => string;
 }
@@ -21,6 +25,12 @@ interface RemoteExplorerProps {
   pathValue: string;
   onPathValueChange: (path: string) => void;
   onPathSubmit: () => void;
+  canGoBack?: boolean;
+  canGoForward?: boolean;
+  canGoParent?: boolean;
+  onGoBack?: () => void;
+  onGoForward?: () => void;
+  onGoParent?: () => void;
   onTreeSelect: (path: string) => void;
   onTreeToggle: (path: string) => void;
   onSelectItem: (key: string, additive: boolean) => void;
@@ -42,6 +52,12 @@ export function RemoteExplorer({
   pathValue,
   onPathValueChange,
   onPathSubmit,
+  canGoBack = false,
+  canGoForward = false,
+  canGoParent = false,
+  onGoBack,
+  onGoForward,
+  onGoParent,
   onTreeSelect,
   onTreeToggle,
   onSelectItem,
@@ -71,6 +87,38 @@ export function RemoteExplorer({
             onPathSubmit();
           }}
         >
+          <div className="remote-nav-buttons" aria-label="目录导航">
+            <button
+              type="button"
+              aria-label={labels.back ?? '后退'}
+              title={labels.back ?? '后退'}
+              disabled={!canGoBack}
+              onClick={onGoBack}
+            >
+              <ArrowLeft size={16} />
+            </button>
+            <button
+              type="button"
+              aria-label={labels.forward ?? '前进'}
+              title={labels.forward ?? '前进'}
+              disabled={!canGoForward}
+              onClick={onGoForward}
+            >
+              <ArrowRight size={16} />
+            </button>
+            <button
+              type="button"
+              aria-label={labels.parent ?? '上一级'}
+              title={labels.parent ?? '上一级'}
+              disabled={!canGoParent}
+              onClick={onGoParent}
+            >
+              <ArrowUp size={16} />
+            </button>
+            <button type="button" aria-label={labels.refresh} title={labels.refresh} onClick={onRefresh}>
+              <RefreshCcw size={16} />
+            </button>
+          </div>
           <label>
             <span>{labels.path}</span>
             <input

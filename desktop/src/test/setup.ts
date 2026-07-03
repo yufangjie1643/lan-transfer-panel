@@ -11,26 +11,44 @@ vi.mock('@tauri-apps/api/core', () => ({
       return Promise.resolve([
         {
           id: 'server-10-42-0-1',
-          label: '本机面板 + 服务器 10.42.0.1',
-          backendUrl: 'http://localhost:5590',
-          username: 'rclone',
-          password: 'loaded-secret'
-        },
-        {
-          id: 'local-dev',
-          label: '本机开发 127.0.0.1',
-          backendUrl: 'http://localhost:5590',
-          username: 'admin',
-          password: ''
+          label: 'yufanssh',
+          host: '10.42.0.1',
+          port: 2687,
+          username: 'yufan',
+          authMethod: 'key',
+          privateKeyPath: 'C:\\Users\\admin\\.ssh\\id_ed25519_local',
+          password: '',
+          saveCredential: false
         },
         {
           id: 'custom',
           label: '自定义连接',
-          backendUrl: '',
+          host: '',
+          port: 22,
           username: '',
-          password: ''
+          authMethod: 'password',
+          password: '',
+          saveCredential: false
         }
       ]);
+    }
+    if (command === 'save_connection_profile') {
+      return Promise.resolve([]);
+    }
+    if (command === 'delete_connection_profile') {
+      return Promise.resolve([]);
+    }
+    if (command === 'test_ssh_connection') {
+      return Promise.resolve('/home/yufan');
+    }
+    if (command === 'list_ssh_directory') {
+      return Promise.resolve({
+        path: '/home/yufan',
+        list: [
+          { Path: '/home/yufan/.codex', Name: '.codex', IsDir: true },
+          { Path: '/home/yufan/logs_2.sqlite', Name: 'logs_2.sqlite', IsDir: false, Size: 2048 }
+        ]
+      });
     }
     if (command === 'list_local_directory') {
       return Promise.resolve([]);
@@ -41,7 +59,38 @@ vi.mock('@tauri-apps/api/core', () => ({
     if (command === 'select_download_directory') {
       return Promise.resolve('D:\\download');
     }
-    if (command === 'start_virtual_download_drag') {
+    if (command === 'download_ssh_file') {
+      return Promise.resolve('D:\\download');
+    }
+    if (command === 'download_ssh_folder') {
+      return Promise.resolve('D:\\download');
+    }
+    if (command === 'prepare_ssh_virtual_file') {
+      return Promise.resolve('D:\\Temp\\lan-transfer-virtual-drag\\logs_2.sqlite');
+    }
+    if (command === 'start_virtual_file_drag') {
+      return Promise.resolve();
+    }
+    if (command === 'start_ssh_download_task') {
+      return Promise.resolve('ssh-1-logs_2.sqlite');
+    }
+    if (command === 'list_transfer_tasks') {
+      return Promise.resolve({
+        globalStat: {},
+        active: [
+          {
+            gid: 'ssh-1-logs_2.sqlite',
+            status: 'active',
+            completedLength: '0',
+            totalLength: '2048',
+            downloadSpeed: '0'
+          }
+        ],
+        waiting: [],
+        stopped: []
+      });
+    }
+    if (command === 'control_transfer_task') {
       return Promise.resolve();
     }
     return Promise.reject(new Error(`Unexpected Tauri command: ${command}`));

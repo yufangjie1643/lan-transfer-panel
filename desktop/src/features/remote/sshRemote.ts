@@ -1,52 +1,68 @@
 import { invoke } from '@tauri-apps/api/core';
-import type { ConnectionProfile } from '../auth/connectionProfiles';
 import type { RemoteItem } from '../../api/types';
+import type { DownloadTasksResponse } from '../../api/types';
+import type { ConnectionProfile } from '../auth/connectionProfiles';
 
-export interface SshListResponse {
+export interface SshDirectoryListing {
   path: string;
   list: RemoteItem[];
 }
 
 export function testSshConnection(profile: ConnectionProfile) {
-  return invoke<void>('test_ssh_connection', { profile });
+  return invoke<string>('test_ssh_connection', { profile });
 }
 
 export function listSshDirectory(profile: ConnectionProfile, path: string) {
-  return invoke<SshListResponse>('list_ssh_directory', { profile, path });
+  return invoke<SshDirectoryListing>('list_ssh_directory', { profile, path });
 }
 
-export function prepareSshVirtualFile(
-  profile: ConnectionProfile,
-  remotePath: string
-) {
-  return invoke<{ url: string }>('prepare_ssh_virtual_file', {
-    profile,
-    remotePath
-  });
+export function downloadSshFile(profile: ConnectionProfile, remotePath: string, localDir: string) {
+  return invoke<string>('download_ssh_file', { profile, remotePath, localDir });
+}
+
+export function downloadSshFolder(profile: ConnectionProfile, remotePath: string, localDir: string) {
+  return invoke<string>('download_ssh_folder', { profile, remotePath, localDir });
 }
 
 export function startSshDownloadTask(
   profile: ConnectionProfile,
   remotePath: string,
-  localDirectory: string
+  localDir: string,
+  recursive: boolean,
+  name: string,
+  size?: number
 ) {
-  return invoke<void>('start_ssh_download_task', {
+  return invoke<string>('start_ssh_download_task', {
     profile,
     remotePath,
-    localDirectory
+    localDir,
+    recursive,
+    name,
+    size
   });
+}
+
+export function listTransferTasks() {
+  return invoke<DownloadTasksResponse>('list_transfer_tasks');
+}
+
+export function controlTransferTask(gid: string, action: string) {
+  return invoke<void>('control_transfer_task', { gid, action });
+}
+
+export function prepareSshVirtualFile(
+  profile: ConnectionProfile,
+  remotePath: string,
+  name: string
+) {
+  return invoke<string>('prepare_ssh_virtual_file', { profile, remotePath, name });
 }
 
 export function startVirtualFileDrag(
   name: string,
   remotePath: string,
-  downloadUrl: string,
+  localPath: string,
   size?: number
 ) {
-  return invoke<void>('start_virtual_file_drag', {
-    name,
-    remotePath,
-    downloadUrl,
-    size
-  });
+  return invoke<void>('start_virtual_file_drag', { name, remotePath, localPath, size });
 }

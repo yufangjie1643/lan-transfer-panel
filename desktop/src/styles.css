@@ -105,6 +105,71 @@ body {
   background: #d6dce5;
 }
 
+.auth-method-group {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  margin: 0;
+  padding: 8px 10px;
+  border: 1px solid #d8dee6;
+  border-radius: 4px;
+}
+
+.auth-method-group legend {
+  padding: 0 4px;
+  color: #4b5563;
+  font-size: 12px;
+}
+
+.auth-method-group label,
+.checkbox-row {
+  display: flex;
+  grid-template-columns: none;
+  align-items: center;
+  gap: 6px;
+}
+
+.auth-method-group input,
+.checkbox-row input {
+  width: 14px;
+  height: 14px;
+  padding: 0;
+}
+
+.profile-actions {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 8px;
+}
+
+.profile-actions button {
+  border-color: #c6ced8;
+  background: #fff;
+  color: #1f2933;
+}
+
+.advanced-settings {
+  display: grid;
+  gap: 8px;
+  padding: 8px 0;
+  border-top: 1px solid #e5e9f0;
+  border-bottom: 1px solid #e5e9f0;
+}
+
+.advanced-settings summary {
+  cursor: pointer;
+  color: #334155;
+  font-size: 13px;
+}
+
+.advanced-settings[open] {
+  gap: 10px;
+}
+
+.advanced-settings[open] summary {
+  margin-bottom: 8px;
+}
+
 .top-bar-actions {
   display: flex;
   align-items: center;
@@ -233,12 +298,25 @@ body {
 .remote-path-bar {
   min-width: 0;
   display: grid;
-  grid-template-columns: minmax(0, 1fr) auto;
+  grid-template-columns: auto minmax(0, 1fr) auto;
   gap: 8px;
   align-items: center;
   padding: 7px 10px;
   border-bottom: 1px solid #e5eaf0;
   background: #f8fafc;
+}
+
+.remote-nav-buttons {
+  display: grid;
+  grid-auto-flow: column;
+  gap: 4px;
+}
+
+.remote-nav-buttons button {
+  width: 30px;
+  padding: 0;
+  display: grid;
+  place-items: center;
 }
 
 .remote-path-bar label {
@@ -270,6 +348,13 @@ body {
   color: #174a8b;
   background: #eef5ff;
   font: inherit;
+}
+
+.remote-path-bar button:disabled {
+  border-color: #d7dee8;
+  color: #9aa7b5;
+  background: #f4f7fa;
+  cursor: not-allowed;
 }
 
 .folder-tree {
@@ -489,12 +574,20 @@ body {
 .queue-row {
   min-height: 30px;
   display: grid;
-  grid-template-columns: minmax(80px, 1fr) 90px 70px 90px 28px 28px 28px;
+  grid-template-columns: minmax(80px, 1fr) 90px 70px 90px minmax(0, 1fr) 28px 28px 28px;
   gap: 8px;
   align-items: center;
   padding: 0 8px;
   border-bottom: 1px solid #edf1f5;
   font-size: 12px;
+}
+
+.queue-error {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: #b42318;
 }
 
 .queue-gid {

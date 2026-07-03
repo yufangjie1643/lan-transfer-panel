@@ -60,21 +60,6 @@ export class PanelApiClient {
     });
   }
 
-  async createVirtualDragDownload(remote: string, path: string) {
-    const response = await this.request<{ ok: true; token: string; expiresAt: string }>(
-      '/api/virtual-drag-token',
-      {
-        method: 'POST',
-        body: JSON.stringify({ remote, path })
-      }
-    );
-    const query = new URLSearchParams({ downloadToken: response.token });
-    return {
-      ...response,
-      url: `${this.baseUrl}/api/download?${query}`
-    };
-  }
-
   async raw(path: string, init: RequestInit = {}) {
     const response = await this.fetchImpl(`${this.baseUrl}${path}`, {
       credentials: 'include',

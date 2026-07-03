@@ -43,8 +43,6 @@ const bindAddresses = (process.env.PANEL_BIND || '127.0.0.1,10.42.0.1')
 const maxJsonBytes = 1024 * 1024;
 const sessions = new Map();
 const sessionTtlMs = 12 * 60 * 60 * 1000;
-const downloadTokens = new Map();
-const downloadTokenTtlMs = 2 * 60 * 1000;
 const servedRemotes = new Map();
 const sshServedDirectories = new Map();
 const sshTunnels = new Map();
@@ -62,9 +60,6 @@ setInterval(() => {
   const now = Date.now();
   for (const [sid, session] of sessions) {
     if (session.expiresAt <= now) sessions.delete(sid);
-  }
-  for (const [token, download] of downloadTokens) {
-    if (download.expiresAt <= now) downloadTokens.delete(token);
   }
   for (const [key, served] of servedRemotes) {
     if (served.expiresAt <= now) stopServedRemote(key);
@@ -297,11 +292,6 @@ async function requestHandler(req, res) {
 async function handleApi(req, res, requestUrl) {
   const endpoint = requestUrl.pathname;
 
-  if (endpoint === '/api/download' && req.method === 'GET' && requestUrl.searchParams.has('downloadToken')) {
-    await handleDownloadWithToken(req, res, requestUrl);
-    return;
-  }
-
   if (endpoint === '/api/login' && req.method === 'POST') {
     const body = await readJson(req);
     const ok =
@@ -448,24 +438,6 @@ async function handleApi(req, res, requestUrl) {
       ? await addSshFileToLocalAria2(body)
       : await addRcloneFileToLocalAria2(body);
     sendJson(res, 200, result);
-    return;
-  }
-
-  if (endpoint === '/api/virtual-drag-token' && req.method === 'POST') {
-    const body = await readJson(req);
-    const remote = assertRemote(body.remote);
-    const remotePath = isSshRemote(remote)
-      ? normalizeSshRemotePath(body.path || '')
-      : normalizeRemotePath(body.path || '');
-    if (!remotePath) throw Object.assign(new Error('缺少文件路径'), { statusCode: 400 });
-    const token = crypto.randomBytes(24).toString('hex');
-    const expiresAt = Date.now() + downloadTokenTtlMs;
-    downloadTokens.set(token, { remote, path: remotePath, expiresAt });
-    sendJson(res, 200, {
-      ok: true,
-      token,
-      expiresAt: new Date(expiresAt).toISOString(),
-    });
     return;
   }
 
@@ -1547,17 +1519,6 @@ async function handleDownload(req, res, requestUrl) {
   if (!remotePath) throw Object.assign(new Error('缺少文件路径'), { statusCode: 400 });
 
   await handleDownloadForRemotePath(req, res, remote, remotePath);
-}
-
-async function handleDownloadWithToken(req, res, requestUrl) {
-  const token = String(requestUrl.searchParams.get('downloadToken') || '');
-  const download = downloadTokens.get(token);
-  if (!download || download.expiresAt <= Date.now()) {
-    downloadTokens.delete(token);
-    throw Object.assign(new Error('下载 token 已失效'), { statusCode: 401 });
-  }
-  downloadTokens.delete(token);
-  await handleDownloadForRemotePath(req, res, download.remote, download.path);
 }
 
 async function handleDownloadForRemotePath(req, res, remote, remotePath) {

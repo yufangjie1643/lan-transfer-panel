@@ -2,8 +2,7 @@ import { describe, expect, it, vi } from 'vitest';
 import {
   collectUploadEntries,
   listLocalDirectory,
-  listLocalRoots,
-  startVirtualDownloadDrag
+  listLocalRoots
 } from './localFs';
 import { invoke } from '@tauri-apps/api/core';
 
@@ -16,9 +15,6 @@ vi.mock('@tauri-apps/api/core', () => ({
       return Promise.resolve([
         { sourcePath: 'C:\\Temp\\file.txt', relativePath: 'file.txt', isDir: false }
       ]);
-    }
-    if (command === 'start_virtual_download_drag') {
-      return Promise.resolve();
     }
     return Promise.resolve([{ path: 'C:\\Temp\\file.txt', name: 'file.txt', isDir: false, size: 4 }]);
   })
@@ -48,19 +44,4 @@ describe('localFs', () => {
     expect(entries[0].relativePath).toBe('file.txt');
   });
 
-  it('starts a virtual download drag through Tauri invoke', async () => {
-    await startVirtualDownloadDrag(
-      'file.txt',
-      '/home/yufan/file.txt',
-      'http://localhost:5590/api/download?downloadToken=abc',
-      12
-    );
-
-    expect(invoke).toHaveBeenCalledWith('start_virtual_download_drag', {
-      name: 'file.txt',
-      remotePath: '/home/yufan/file.txt',
-      downloadUrl: 'http://localhost:5590/api/download?downloadToken=abc',
-      size: 12
-    });
-  });
 });

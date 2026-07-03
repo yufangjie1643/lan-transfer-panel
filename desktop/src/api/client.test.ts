@@ -58,26 +58,6 @@ describe('PanelApiClient', () => {
     );
   });
 
-  it('creates tokenized virtual drag download URLs', async () => {
-    const fetchMock = vi.fn().mockResolvedValue({
-      ok: true,
-      json: async () => ({ ok: true, token: 'drag-token', expiresAt: '2026-06-28T00:00:00.000Z' })
-    });
-    const client = new PanelApiClient('http://127.0.0.1:5590', fetchMock as never);
-
-    const result = await client.createVirtualDragDownload('server', '/home/yufan/.bash_history');
-
-    expect(fetchMock).toHaveBeenCalledWith(
-      'http://127.0.0.1:5590/api/virtual-drag-token',
-      expect.objectContaining({
-        method: 'POST',
-        credentials: 'include',
-        body: JSON.stringify({ remote: 'server', path: '/home/yufan/.bash_history' })
-      })
-    );
-    expect(result.url).toBe('http://127.0.0.1:5590/api/download?downloadToken=drag-token');
-  });
-
   it('calls the default browser fetch with the global receiver', async () => {
     const fetchMock = vi.fn(function (this: unknown) {
       expect(this).toBe(globalThis);

@@ -8,7 +8,6 @@
     "start": "node server.js",
     "dev": "node scripts/dev-all.js",
     "dev:server": "node scripts/dev-server.js",
-    "demo:check": "node scripts/check-demo.js",
     "build": "npm --prefix desktop run build",
     "test": "node --test \"test/*.test.js\"",
     "desktop:dev": "npm --prefix desktop run tauri:dev",

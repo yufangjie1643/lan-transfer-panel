@@ -25,7 +25,7 @@ interface AppState {
 }
 
 export const useAppStore = create<AppState>((set) => ({
-  backendUrl: 'http://localhost:5590',
+  backendUrl: 'http://10.42.0.1:5590',
   sessionUsername: null,
   remotes: [],
   remote: '',

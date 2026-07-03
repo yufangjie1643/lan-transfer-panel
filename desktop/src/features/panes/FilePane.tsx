@@ -60,12 +60,15 @@ export function FilePane({
           <div
             className={selectedKeys.has(item.key) ? 'file-row selected' : 'file-row'}
             key={item.key}
-            draggable={Boolean(onDragDownload)}
+            draggable={Boolean(onDragDownload && !item.isDir)}
             onMouseDown={(event) => {
-              if (event.button === 0) onPrepareNativeDrag?.(item.key);
+              if (event.button === 0 && !item.isDir) onPrepareNativeDrag?.(item.key);
             }}
             onDragStart={(event) => {
-              if (!onDragDownload) return;
+              if (!onDragDownload || item.isDir) {
+                event.preventDefault();
+                return;
+              }
               if (onNativeDragStart?.(item.key)) {
                 event.currentTarget.dataset.nativeDrag = 'true';
                 event.preventDefault();
@@ -84,12 +87,14 @@ export function FilePane({
                 delete event.currentTarget.dataset.nativeDrag;
                 return;
               }
+              if (item.isDir) return;
               onDragDownload?.(item.key);
             }}
           >
             <button
               type="button"
               className="file-row-main"
+              draggable={Boolean(onDragDownload && !item.isDir)}
               aria-pressed={selectedKeys.has(item.key)}
               onClick={(event) => onSelect(item.key, event.ctrlKey || event.metaKey)}
               onDoubleClick={() => item.isDir && onOpenDirectory(item.key)}

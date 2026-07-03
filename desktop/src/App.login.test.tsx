@@ -7,27 +7,13 @@ describe('App login flow', () => {
     vi.unstubAllGlobals();
   });
 
-  it('logs in to the configured backend', async () => {
-    const fetchMock = vi.fn().mockResolvedValue({
-      ok: true,
-      json: async () => ({ ok: true, username: 'admin' })
-    });
-    vi.stubGlobal('fetch', fetchMock);
-
+  it('logs in with the selected SSH profile', async () => {
     render(<App />);
 
-    await waitFor(() => expect(screen.getByLabelText('用户名')).toHaveValue('rclone'));
-    expect(screen.getByLabelText('密码')).toHaveValue('loaded-secret');
+    await waitFor(() => expect(screen.getByLabelText('用户名')).toHaveValue('yufan'));
     fireEvent.click(screen.getByRole('button', { name: '连接' }));
 
-    await waitFor(() => expect(screen.getByText('已连接：admin')).toBeInTheDocument());
-    expect(fetchMock).toHaveBeenCalledWith(
-      'http://localhost:5590/api/login',
-      expect.objectContaining({
-        method: 'POST',
-        credentials: 'include',
-        body: JSON.stringify({ username: 'rclone', password: 'loaded-secret' })
-      })
-    );
+    await waitFor(() => expect(screen.getByText('已连接：yufan@10.42.0.1:2687')).toBeInTheDocument());
+    expect(screen.getByText('logs_2.sqlite')).toBeInTheDocument();
   });
 });

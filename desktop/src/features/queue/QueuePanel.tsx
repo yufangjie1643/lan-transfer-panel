@@ -28,6 +28,7 @@ export function QueuePanel({ tasks, onControl, labels = defaultMessages.queue }:
             <span>{task.status || ''}</span>
             <span>{formatProgress(task.completedLength, task.totalLength)}</span>
             <span>{formatSpeed(task.downloadSpeed)}</span>
+            {task.errorMessage ? <span className="queue-error">{task.errorMessage}</span> : null}
             <button type="button" aria-label={text.pause(task.gid)} onClick={() => onControl(task.gid, 'pause')}>
               <Pause size={14} />
             </button>

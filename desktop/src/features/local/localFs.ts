@@ -34,12 +34,3 @@ export function collectUploadEntries(paths: string[]) {
 export function selectDownloadDirectory() {
   return invoke<string | null>('select_download_directory');
 }
-
-export function startVirtualDownloadDrag(
-  name: string,
-  remotePath: string,
-  downloadUrl: string,
-  size?: number
-) {
-  return invoke<void>('start_virtual_download_drag', { name, remotePath, downloadUrl, size });
-}

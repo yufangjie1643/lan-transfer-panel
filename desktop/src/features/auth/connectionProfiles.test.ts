@@ -10,7 +10,10 @@ describe('connectionProfiles', () => {
     expect(profiles[0]).toEqual(
       expect.objectContaining({
         id: 'server-10-42-0-1',
-        backendUrl: 'http://localhost:5590'
+        host: '10.42.0.1',
+        port: 2687,
+        username: 'yufan',
+        authMethod: 'key'
       })
     );
   });

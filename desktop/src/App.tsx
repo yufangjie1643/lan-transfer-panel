@@ -33,8 +33,8 @@ type PreparedNativeDrag = {
   name: string;
   remotePath: string;
   size?: number;
-  promise: Promise<{ url: string }>;
-  download?: { url: string };
+  promise: Promise<{ localPath: string }>;
+  localPath?: string;
 };
 const nativeDragMaxBytes = 128 * 1024 * 1024;
 
@@ -48,6 +48,26 @@ function buildRemoteTreeNodes(
 
   const nodes: FolderTreeNode[] = [];
   const seen = new Set<string>();
+  const syntheticChildren = new Map<string, Set<string>>();
+
+  function addSyntheticPath(path: string) {
+    if (!path.startsWith('/')) return;
+    const ancestors = pathAncestors(path);
+    for (let index = 1; index < ancestors.length; index += 1) {
+      const parent = ancestors[index - 1];
+      const child = ancestors[index];
+      if (!syntheticChildren.has(parent)) syntheticChildren.set(parent, new Set());
+      syntheticChildren.get(parent)!.add(child);
+    }
+  }
+
+  addSyntheticPath(selectedPath);
+  for (const [path, items] of Object.entries(childrenByPath)) {
+    addSyntheticPath(path);
+    for (const child of items) {
+      if (child.IsDir) addSyntheticPath(child.Path || child.Name);
+    }
+  }
 
   function pushNode(path: string, name: string, depth: number) {
     if (seen.has(path)) return;
@@ -64,12 +84,16 @@ function buildRemoteTreeNodes(
 
     if (!expandedPaths.has(path)) return;
 
+    for (const childPath of [...(syntheticChildren.get(path) ?? [])].sort()) {
+      pushNode(childPath, pathBasename(childPath), depth + 1);
+    }
+
     for (const child of childrenByPath[path] ?? []) {
       if (child.IsDir) pushNode(child.Path || child.Name, child.Name, depth + 1);
     }
   }
 
-  pushNode('', `${remoteName}:`, 0);
+  pushNode('/', '/', 0);
 
   return nodes;
 }
@@ -81,11 +105,13 @@ export default function App({ initialBackendUrl = 'http://localhost:5590' }: App
     defaultConnectionProfiles
   );
   const [remoteTreeChildren, setRemoteTreeChildren] = useState<RemoteTreeChildren>({});
-  const [expandedRemotePaths, setExpandedRemotePaths] = useState<Set<string>>(new Set(['']));
+  const [expandedRemotePaths, setExpandedRemotePaths] = useState<Set<string>>(new Set(['/']));
   const [sshRoot, setSshRoot] = useState('/home/yufan');
   const [sshProfile, setSshProfile] = useState<ConnectionProfile | null>(null);
   const preparedNativeDrags = useRef(new Map<string, PreparedNativeDrag>());
   const [remotePathInput, setRemotePathInput] = useState('/home/yufan');
+  const [remoteHistory, setRemoteHistory] = useState<string[]>([]);
+  const [remoteHistoryIndex, setRemoteHistoryIndex] = useState(-1);
   const text = messages[locale];
   const appView = useAppStore((state) => state.appView);
   const editingProfileId = useAppStore((state) => state.editingProfileId);
@@ -128,31 +154,14 @@ export default function App({ initialBackendUrl = 'http://localhost:5590' }: App
     };
   }, []);
 
-  const loadRemoteDirectory = useCallback(
-    async (api: PanelApiClient, selectedRemote: string, path: string) => {
-      const listing = await api.list(selectedRemote, path);
-      setRemoteItems(selectedRemote, listing.path, listing.list);
+  const loadSshDirectory = useCallback(
+    async (profile: ConnectionProfile, path: string) => {
+      const listing = await listSshDirectory(profile, path);
+      setRemoteItems('server', listing.path, listing.list);
       setRemoteTreeChildren((current) => ({ ...current, [listing.path]: listing.list }));
+      return listing;
     },
     [setRemoteItems]
-  );
-
-  const loadRemoteRoot = useCallback(
-    async (api: PanelApiClient) => {
-      const response = await api.getRemotes();
-      const remotes = Array.isArray(response.remotes) ? response.remotes : [];
-      setRemotes(remotes);
-      if (!remotes.length) {
-        setRemoteItems('', '', []);
-        setRemoteTreeChildren({});
-        setExpandedRemotePaths(new Set(['']));
-        return;
-      }
-      setRemoteTreeChildren({});
-      setExpandedRemotePaths(new Set(['']));
-      await loadRemoteDirectory(api, remotes[0], '');
-    },
-    [loadRemoteDirectory, setRemoteItems, setRemotes]
   );
 
   const remoteTreeNodes = useMemo(
@@ -160,36 +169,35 @@ export default function App({ initialBackendUrl = 'http://localhost:5590' }: App
     [expandedRemotePaths, remote, remotePath, remoteTreeChildren]
   );
 
-  const handleRemoteTreeToggle = useCallback(
-    (path: string) => {
-      const shouldLoad = remote && !remoteTreeChildren[path];
-      setExpandedRemotePaths((current) => {
-        const next = new Set(current);
-        if (next.has(path)) next.delete(path);
-        else next.add(path);
+  const canGoBack = remoteHistoryIndex > 0;
+  const canGoForward = remoteHistoryIndex >= 0 && remoteHistoryIndex < remoteHistory.length - 1;
+  const canGoParent = Boolean(parentPath(remotePath));
+
+  const navigateSshDirectory = useCallback(
+    async (path: string, mode: 'push' | 'replace' | 'history' = 'push') => {
+      if (!sshProfile) {
+        reportSshFilesPending();
+        return;
+      }
+      const listing = await loadSshDirectory(sshProfile, normalizeAbsolutePath(path));
+      const nextPath = listing.path;
+      if (mode === 'history') return;
+      setRemoteHistory((current) => {
+        if (mode === 'replace') {
+          const next = current.length ? [...current] : [nextPath];
+          const index = remoteHistoryIndex >= 0 ? remoteHistoryIndex : 0;
+          next[index] = nextPath;
+          setRemoteHistoryIndex(index);
+          return next;
+        }
+        if (current[remoteHistoryIndex] === nextPath) return current;
+        const prefix = remoteHistoryIndex >= 0 ? current.slice(0, remoteHistoryIndex + 1) : [];
+        const next = [...prefix, nextPath];
+        setRemoteHistoryIndex(next.length - 1);
         return next;
       });
-
-      if (!shouldLoad) return;
-
-      loadRemoteDirectory(client, remote, path)
-        .catch((toggleError) => {
-          setError(
-            toggleError instanceof Error ? toggleError.message : text.errors.openDirectoryFailed
-          );
-        });
     },
-    [client, loadRemoteDirectory, remote, remoteTreeChildren, setError, text.errors.openDirectoryFailed]
-  );
-
-  const handleRemoteTreeSelect = useCallback(
-    (path: string) => {
-      if (!remote) return;
-      loadRemoteDirectory(client, remote, path).catch((openError) => {
-        setError(openError instanceof Error ? openError.message : text.errors.openDirectoryFailed);
-      });
-    },
-    [client, loadRemoteDirectory, remote, setError, text.errors.openDirectoryFailed]
+    [loadSshDirectory, remoteHistoryIndex, sshProfile]
   );
 
   const [isSavingProfile, setIsSavingProfile] = useState(false);
@@ -263,6 +271,8 @@ export default function App({ initialBackendUrl = 'http://localhost:5590' }: App
       setRemoteTreeChildren({});
       setExpandedRemotePaths(new Set(pathAncestors(root)));
       await loadSshDirectory(credentials, root);
+      setRemoteHistory([root]);
+      setRemoteHistoryIndex(0);
       setAppView('remote');
     } catch (connectError) {
       setSshProfile(null);
@@ -290,18 +300,12 @@ export default function App({ initialBackendUrl = 'http://localhost:5590' }: App
     }
   }
 
-  const loadSshDirectory = useCallback(
-    async (credentials: ConnectionProfile, path: string) => {
-      const listing = await listSshDirectory(credentials, path);
-      setRemoteItems('server', listing.path, listing.list);
-      setRemoteTreeChildren((current) => ({ ...current, [listing.path]: listing.list }));
-    },
-    [setRemoteItems]
-  );
-
   const handleRemoteDownload = useCallback(
     async (key: string) => {
-      if (!remote) return;
+      if (!sshProfile) {
+        reportSshFilesPending();
+        return;
+      }
       const item = remoteItems.find((candidate) => (candidate.Path || candidate.Name) === key);
       if (!item) return;
 
@@ -309,44 +313,26 @@ export default function App({ initialBackendUrl = 'http://localhost:5590' }: App
         setError(null);
         const directory = await selectDownloadDirectory();
         if (!directory) return;
-        const result = await client.addRemoteDownload(remote, item.Path || item.Name, directory);
-        if (result.requiresConfirmation) {
-          if (!isUsableFolderDownloadPlan(result.plan)) {
-            setError('下载计划格式过旧，请刷新页面并确认后端已重启。');
-            return;
-          }
-          const summary = result.summary;
-          const confirmed = window.confirm(
-            [
-              `文件夹：${summary?.name || item.Name}`,
-              `文件数：${summary?.fileCount ?? 0}`,
-              `总大小：${formatSize(summary?.totalSize)}`,
-              `小文件归档：${result.plan?.archive?.fileCount ?? 0} 个，${formatSize(result.plan?.archive?.totalSize)}`,
-              `大文件直下：${result.plan?.direct?.fileCount ?? 0} 个，${formatSize(result.plan?.direct?.totalSize)}`,
-              `小文件阈值：${formatSize(result.plan?.smallFileBytes)}`,
-              `小文件打包门槛：超过 ${result.plan?.minSmallFilesToArchive ?? 10} 个`,
-              '达到门槛的小文件打包下载后自动解压，其余文件直接加入 aria2。',
-              '继续？'
-            ].join('\n')
-          );
-          if (!confirmed) return;
-          await client.addRemoteDownload(remote, item.Path || item.Name, directory, {
-            confirmed: true,
-            planToken: result.planToken
-          });
-        }
+        await startSshDownloadTask(
+          sshProfile,
+          item.Path || item.Name,
+          directory,
+          item.IsDir,
+          item.Name,
+          item.Size
+        );
       } catch (downloadError) {
         setError(downloadError instanceof Error ? downloadError.message : text.errors.downloadFailed);
       }
     },
-    [client, remote, remoteItems, setError, text.errors.downloadFailed]
+    [remoteItems, setError, sshProfile, text.errors.downloadFailed]
   );
 
   const prepareNativeDrag = useCallback(
     (key: string) => {
+      if (!sshProfile) return;
       const item = remoteItems.find((candidate) => (candidate.Path || candidate.Name) === key);
       if (
-        !remote ||
         !item ||
         item.IsDir ||
         Number(item.Size || 0) > nativeDragMaxBytes ||
@@ -357,43 +343,48 @@ export default function App({ initialBackendUrl = 'http://localhost:5590' }: App
         name: item.Name,
         remotePath,
         size: item.Size,
-        promise: client.createVirtualDragDownload(remote, remotePath).then((download) => {
-          prepared.download = { url: download.url };
-          return prepared.download;
+        promise: prepareSshVirtualFile(sshProfile, remotePath, item.Name).then((localPath) => {
+          prepared.localPath = localPath;
+          return { localPath };
         })
       };
       preparedNativeDrags.current.set(key, prepared);
     },
-    [client, remote, remoteItems]
+    [remoteItems, sshProfile]
   );
 
   const handleNativeDragStart = useCallback(
     (key: string) => {
+      if (!sshProfile) return false;
       const item = remoteItems.find((candidate) => (candidate.Path || candidate.Name) === key);
-      if (!remote || !item || item.IsDir) return false;
+      if (!item || item.IsDir) return false;
       if (Number(item.Size || 0) > nativeDragMaxBytes) return false;
       const remotePath = item.Path || item.Name;
       const prepared = preparedNativeDrags.current.get(key);
       preparedNativeDrags.current.delete(key);
-      const launch = (download: { url: string }) =>
-        startVirtualFileDrag(item.Name, remotePath, download.url, item.Size);
-      const launchPromise = prepared?.download
-        ? launch(prepared.download)
-        : (prepared?.promise || client.createVirtualDragDownload(remote, remotePath)).then(launch);
+      const launch = (localPath: string) =>
+        startVirtualFileDrag(item.Name, remotePath, localPath, item.Size);
+      const launchPromise = prepared?.localPath
+        ? launch(prepared.localPath)
+        : (prepared?.promise || prepareSshVirtualFile(sshProfile, remotePath, item.Name))
+          .then((result) => launch(typeof result === 'string' ? result : result.localPath));
       launchPromise.catch((dragError) => {
         setError(dragError instanceof Error ? dragError.message : '原生拖拽启动失败');
       });
       return true;
     },
-    [client, remote, remoteItems, setError]
+    [remoteItems, setError, sshProfile]
   );
 
   const handleRemotePathSubmit = useCallback(async () => {
-    if (!remote) return;
+    if (!sshProfile) {
+      reportSshFilesPending();
+      return;
+    }
     const submittedPath = parseRemotePathInput(remotePathInput, remote);
     try {
       setError(null);
-      await loadRemoteDirectory(client, remote, submittedPath);
+      await navigateSshDirectory(submittedPath);
     } catch (openError) {
       const message = openError instanceof Error ? openError.message : text.errors.openDirectoryFailed;
       if (!isNotDirectoryError(message)) {
@@ -404,17 +395,23 @@ export default function App({ initialBackendUrl = 'http://localhost:5590' }: App
       try {
         const directory = await selectDownloadDirectory();
         if (!directory) return;
-        await client.addRemoteDownload(remote, submittedPath, directory);
+        await startSshDownloadTask(
+          sshProfile,
+          submittedPath,
+          directory,
+          false,
+          pathBasename(submittedPath)
+        );
       } catch (downloadError) {
         setError(downloadError instanceof Error ? downloadError.message : text.errors.downloadFailed);
       }
     }
   }, [
-    client,
-    loadRemoteDirectory,
     remote,
     remotePathInput,
     setError,
+    sshProfile,
+    navigateSshDirectory,
     text.errors.downloadFailed,
     text.errors.openDirectoryFailed
   ]);
@@ -426,6 +423,8 @@ export default function App({ initialBackendUrl = 'http://localhost:5590' }: App
     setRemoteItems('', '', []);
     setRemoteTreeChildren({});
     setExpandedRemotePaths(new Set(['/']));
+    setRemoteHistory([]);
+    setRemoteHistoryIndex(-1);
     setAppView('launcher');
   }
 
@@ -442,6 +441,53 @@ export default function App({ initialBackendUrl = 'http://localhost:5590' }: App
     } catch {
       window.open('/queue', 'transfer-queue', 'width=720,height=520');
     }
+  }
+
+  function reportSshFilesPending() {
+    setError('请选择服务器并连接后再浏览文件。');
+  }
+
+  async function handleSshDirectoryOpen(path: string) {
+    try {
+      setError(null);
+      await navigateSshDirectory(path);
+    } catch (openError) {
+      setError(openError instanceof Error ? openError.message : text.errors.openDirectoryFailed);
+    }
+  }
+
+  async function handleGoBack() {
+    if (!canGoBack) return;
+    const nextIndex = remoteHistoryIndex - 1;
+    const path = remoteHistory[nextIndex];
+    if (!path) return;
+    try {
+      setError(null);
+      setRemoteHistoryIndex(nextIndex);
+      await navigateSshDirectory(path, 'history');
+    } catch (openError) {
+      setError(openError instanceof Error ? openError.message : text.errors.openDirectoryFailed);
+    }
+  }
+
+  async function handleGoForward() {
+    if (!canGoForward) return;
+    const nextIndex = remoteHistoryIndex + 1;
+    const path = remoteHistory[nextIndex];
+    if (!path) return;
+    try {
+      setError(null);
+      setRemoteHistoryIndex(nextIndex);
+      await navigateSshDirectory(path, 'history');
+    } catch (openError) {
+      setError(openError instanceof Error ? openError.message : text.errors.openDirectoryFailed);
+    }
+  }
+
+  async function handleGoParent() {
+    const parent = parentPath(remotePath);
+    if (!parent) return;
+    await handleSshDirectoryOpen(parent);
   }
 
   const connectionText = sessionUsername
@@ -524,6 +570,9 @@ export default function App({ initialBackendUrl = 'http://localhost:5590' }: App
             refresh: text.panes.refresh(text.panes.remote),
             path: text.panes.remotePath,
             openPath: text.panes.openPath,
+            back: text.panes.back,
+            forward: text.panes.forward,
+            parent: text.panes.parent,
             expandFolder: text.panes.expandFolder,
             collapseFolder: text.panes.collapseFolder
           }}
@@ -540,24 +589,30 @@ export default function App({ initialBackendUrl = 'http://localhost:5590' }: App
           pathValue={remotePathInput}
           onPathValueChange={setRemotePathInput}
           onPathSubmit={handleRemotePathSubmit}
-          onTreeSelect={handleRemoteTreeSelect}
-          onTreeToggle={handleRemoteTreeToggle}
+          canGoBack={canGoBack}
+          canGoForward={canGoForward}
+          canGoParent={canGoParent}
+          onGoBack={handleGoBack}
+          onGoForward={handleGoForward}
+          onGoParent={handleGoParent}
+          onTreeSelect={handleSshDirectoryOpen}
+          onTreeToggle={(path) => {
+            setExpandedRemotePaths((current) => {
+              const next = new Set(current);
+              if (next.has(path)) next.delete(path);
+              else next.add(path);
+              return next;
+            });
+            if (!remoteTreeChildren[path]) handleSshDirectoryOpen(path);
+          }}
           onSelectItem={(key, additive) => {
             const next = additive ? new Set(selectedRemoteKeys) : new Set<string>();
             if (next.has(key)) next.delete(key);
             else next.add(key);
             setSelectedRemoteKeys(next);
           }}
-          onOpenDirectory={(key) => {
-            if (remote) loadRemoteDirectory(client, remote, key).catch((openError) => {
-              setError(openError instanceof Error ? openError.message : text.errors.openDirectoryFailed);
-            });
-          }}
-          onRefresh={() => {
-            if (remote) loadRemoteDirectory(client, remote, remotePath).catch((refreshError) => {
-              setError(refreshError instanceof Error ? refreshError.message : text.errors.refreshFailed);
-            });
-          }}
+          onOpenDirectory={handleSshDirectoryOpen}
+          onRefresh={() => handleSshDirectoryOpen(remotePath)}
           downloadLabel={text.panes.downloadTo}
           onDownloadFile={handleRemoteDownload}
           onDragDownloadFile={handleRemoteDownload}
@@ -569,42 +624,6 @@ export default function App({ initialBackendUrl = 'http://localhost:5590' }: App
   );
 }
 
-function formatSize(size?: number) {
-  if (size == null) return '0 B';
-  if (size < 1024) return `${size} B`;
-  if (size < 1024 * 1024) return `${(size / 1024).toFixed(1)} KB`;
-  if (size < 1024 * 1024 * 1024) return `${(size / 1024 / 1024).toFixed(1)} MB`;
-  return `${(size / 1024 / 1024 / 1024).toFixed(1)} GB`;
-}
-
-function pathAncestors(path: string): string[] {
-  const ancestors: string[] = [];
-  let current = path;
-  while (current && current !== '/') {
-    ancestors.push(current);
-    const lastSlash = current.lastIndexOf('/');
-    current = lastSlash === 0 ? '/' : current.slice(0, lastSlash);
-  }
-  ancestors.push('/');
-  return ancestors;
-}
-
-function isUsableFolderDownloadPlan(plan: unknown) {
-  if (!plan || typeof plan !== 'object') return false;
-  const candidate = plan as {
-    smallFileBytes?: unknown;
-    archive?: { fileCount?: unknown; totalSize?: unknown };
-    direct?: { fileCount?: unknown; totalSize?: unknown };
-  };
-  return (
-    typeof candidate.smallFileBytes === 'number' &&
-    typeof candidate.archive?.fileCount === 'number' &&
-    typeof candidate.archive?.totalSize === 'number' &&
-    typeof candidate.direct?.fileCount === 'number' &&
-    typeof candidate.direct?.totalSize === 'number'
-  );
-}
-
 function formatServerPath(path: string, sshRoot: string) {
   if (path.startsWith('/')) return path;
   const root = sshRoot.replace(/\/+$/, '') || '/';
@@ -612,12 +631,46 @@ function formatServerPath(path: string, sshRoot: string) {
   return `${root}/${path.replace(/^\/+/, '')}`;
 }
 
+function normalizeAbsolutePath(path: string) {
+  const normalized = path.trim().replace(/\\/g, '/').replace(/\/+$/, '');
+  if (!normalized) return '/';
+  if (normalized === '/') return '/';
+  return normalized.startsWith('/') ? normalized : `/${normalized}`;
+}
+
+function pathAncestors(path: string) {
+  if (!path.startsWith('/')) return [];
+  const normalized = path.replace(/\/+$/, '') || '/';
+  if (normalized === '/') return ['/'];
+  const segments = normalized.split('/').filter(Boolean);
+  const ancestors = ['/'];
+  let current = '';
+  for (const segment of segments) {
+    current = `${current}/${segment}`;
+    ancestors.push(current);
+  }
+  return ancestors;
+}
+
+function pathBasename(path: string) {
+  if (path === '/') return '/';
+  const normalized = path.replace(/\/+$/, '');
+  return normalized.slice(normalized.lastIndexOf('/') + 1);
+}
+
+function parentPath(path: string) {
+  const normalized = normalizeAbsolutePath(path);
+  if (normalized === '/') return null;
+  const parent = normalized.slice(0, normalized.lastIndexOf('/')) || '/';
+  return parent;
+}
+
 function parseRemotePathInput(value: string, remote: string) {
   let input = value.trim().replace(/\\/g, '/');
   const remotePrefix = `${remote}:`;
   if (input.startsWith(remotePrefix)) input = input.slice(remotePrefix.length);
   if (input === '/') return '/';
-  return input.replace(/\/+$/, '');
+  return normalizeAbsolutePath(input);
 }
 
 function isNotDirectoryError(message: string) {
