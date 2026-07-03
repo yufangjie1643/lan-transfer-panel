@@ -4,13 +4,23 @@ import { PanelApiClient } from './api/client';
 import type { RemoteItem } from './api/types';
 import {
   defaultConnectionProfiles,
+  deleteConnectionProfile,
   listConnectionProfiles,
+  saveConnectionProfile,
   type ConnectionProfile
 } from './features/auth/connectionProfiles';
-import { LoginScreen } from './features/auth/LoginScreen';
-import { selectDownloadDirectory, startVirtualDownloadDrag } from './features/local/localFs';
+import { LauncherScreen } from './features/auth/LauncherScreen';
+import { ServerFormScreen } from './features/auth/ServerFormScreen';
+import { selectDownloadDirectory } from './features/local/localFs';
 import type { FolderTreeNode } from './features/local/FolderTree';
 import { RemoteExplorer } from './features/remote/RemoteExplorer';
+import {
+  listSshDirectory,
+  prepareSshVirtualFile,
+  startSshDownloadTask,
+  startVirtualFileDrag,
+  testSshConnection
+} from './features/remote/sshRemote';
 import { defaultLocale, messages, type Locale } from './i18n/messages';
 import { useAppStore } from './state/useAppStore';
 
@@ -73,9 +83,14 @@ export default function App({ initialBackendUrl = 'http://localhost:5590' }: App
   const [remoteTreeChildren, setRemoteTreeChildren] = useState<RemoteTreeChildren>({});
   const [expandedRemotePaths, setExpandedRemotePaths] = useState<Set<string>>(new Set(['']));
   const [sshRoot, setSshRoot] = useState('/home/yufan');
+  const [sshProfile, setSshProfile] = useState<ConnectionProfile | null>(null);
   const preparedNativeDrags = useRef(new Map<string, PreparedNativeDrag>());
   const [remotePathInput, setRemotePathInput] = useState('/home/yufan');
   const text = messages[locale];
+  const appView = useAppStore((state) => state.appView);
+  const editingProfileId = useAppStore((state) => state.editingProfileId);
+  const setAppView = useAppStore((state) => state.setAppView);
+  const setEditingProfileId = useAppStore((state) => state.setEditingProfileId);
   const backendUrl = useAppStore((state) => state.backendUrl);
   const sessionUsername = useAppStore((state) => state.sessionUsername);
   const remote = useAppStore((state) => state.remote);
@@ -177,28 +192,112 @@ export default function App({ initialBackendUrl = 'http://localhost:5590' }: App
     [client, loadRemoteDirectory, remote, setError, text.errors.openDirectoryFailed]
   );
 
-  async function handleLogin(credentials: {
-    backendUrl: string;
-    username: string;
-    password: string;
-  }) {
-    setIsConnecting(true);
+  const [isSavingProfile, setIsSavingProfile] = useState(false);
+  const [launcherErrors, setLauncherErrors] = useState<Record<string, string>>({});
+
+  const handleAddProfile = useCallback(() => {
     setError(null);
-    const loginClient = new PanelApiClient(credentials.backendUrl);
+    setEditingProfileId(undefined);
+    setAppView('server-form');
+  }, [setAppView, setEditingProfileId, setError]);
+
+  const handleEditProfile = useCallback(
+    (profile: ConnectionProfile) => {
+      setError(null);
+      setEditingProfileId(profile.id);
+      setAppView('server-form');
+    },
+    [setAppView, setEditingProfileId, setError]
+  );
+
+  const handleFormCancel = useCallback(() => {
+    setError(null);
+    setEditingProfileId(undefined);
+    setAppView('launcher');
+  }, [setAppView, setEditingProfileId, setError]);
+
+  async function handleSaveProfile(profile: ConnectionProfile) {
+    setIsSavingProfile(true);
+    setError(null);
     try {
-      const session = await loginClient.login(credentials.username, credentials.password);
-      setBackendUrl(credentials.backendUrl);
-      setSessionUsername(session.username);
-      const sessionInfo = await loginClient.getSession().catch(() => null);
-      if (sessionInfo?.sshRoot) setSshRoot(sessionInfo.sshRoot);
-      await loadRemoteRoot(loginClient);
-    } catch (loginError) {
+      const profiles = await saveConnectionProfile(profile);
+      setConnectionProfiles(profiles);
+      setEditingProfileId(undefined);
+      setAppView('launcher');
+    } catch (saveError) {
+      setError(saveError instanceof Error ? saveError.message : '保存配置失败');
+    } finally {
+      setIsSavingProfile(false);
+    }
+  }
+
+  async function handleSaveAndConnect(profile: ConnectionProfile) {
+    setIsSavingProfile(true);
+    setError(null);
+    try {
+      const profiles = await saveConnectionProfile(profile);
+      setConnectionProfiles(profiles);
+      await handleConnect(profile);
+    } catch (saveError) {
+      setError(saveError instanceof Error ? saveError.message : '保存配置失败');
+    } finally {
+      setIsSavingProfile(false);
+    }
+  }
+
+  async function handleConnect(credentials: ConnectionProfile) {
+    setIsConnecting(true);
+    setSshProfile(credentials);
+    setError(null);
+    setLauncherErrors((current) => {
+      const next = { ...current };
+      delete next[credentials.id];
+      return next;
+    });
+    try {
+      await testSshConnection(credentials);
+      const root = `/home/${credentials.username}`;
+      setSshRoot(root);
+      setSessionUsername(`${credentials.username}@${credentials.host}:${credentials.port}`);
+      setRemotes(['server']);
+      setRemoteTreeChildren({});
+      setExpandedRemotePaths(new Set(pathAncestors(root)));
+      await loadSshDirectory(credentials, root);
+      setAppView('remote');
+    } catch (connectError) {
+      setSshProfile(null);
       setSessionUsername(null);
-      setError(loginError instanceof Error ? loginError.message : text.connection.loginFailed);
+      const message = connectError instanceof Error ? connectError.message : text.connection.loginFailed;
+      setLauncherErrors((current) => ({ ...current, [credentials.id]: message }));
+      setError(message);
     } finally {
       setIsConnecting(false);
     }
   }
+
+  async function handleDeleteProfile(id: string) {
+    setError(null);
+    try {
+      const profiles = await deleteConnectionProfile(id);
+      setConnectionProfiles(profiles);
+      setLauncherErrors((current) => {
+        const next = { ...current };
+        delete next[id];
+        return next;
+      });
+    } catch (deleteError) {
+      setError(deleteError instanceof Error ? deleteError.message : '删除配置失败');
+    }
+  }
+
+  const loadSshDirectory = useCallback(
+    async (credentials: ConnectionProfile, path: string) => {
+      const listing = await listSshDirectory(credentials, path);
+      setRemoteItems('server', listing.path, listing.list);
+      setRemoteTreeChildren((current) => ({ ...current, [listing.path]: listing.list }));
+    },
+    [setRemoteItems]
+  );
 
   const handleRemoteDownload = useCallback(
     async (key: string) => {
@@ -277,7 +376,7 @@ export default function App({ initialBackendUrl = 'http://localhost:5590' }: App
       const prepared = preparedNativeDrags.current.get(key);
       preparedNativeDrags.current.delete(key);
       const launch = (download: { url: string }) =>
-        startVirtualDownloadDrag(item.Name, remotePath, download.url, item.Size);
+        startVirtualFileDrag(item.Name, remotePath, download.url, item.Size);
       const launchPromise = prepared?.download
         ? launch(prepared.download)
         : (prepared?.promise || client.createVirtualDragDownload(remote, remotePath)).then(launch);
@@ -322,10 +421,12 @@ export default function App({ initialBackendUrl = 'http://localhost:5590' }: App
 
   function handleSwitchConnection() {
     client.logout().catch(() => undefined);
+    setSshProfile(null);
     setSessionUsername(null);
     setRemoteItems('', '', []);
     setRemoteTreeChildren({});
-    setExpandedRemotePaths(new Set(['']));
+    setExpandedRemotePaths(new Set(['/']));
+    setAppView('launcher');
   }
 
   function handleOpenQueueWindow() {
@@ -349,9 +450,9 @@ export default function App({ initialBackendUrl = 'http://localhost:5590' }: App
       ? text.connection.connecting
       : text.connection.disconnected;
 
-  if (!sessionUsername) {
+  if (appView !== 'remote') {
     return (
-      <main className="login-shell">
+      <main className="launcher-shell">
         <header className="login-top-bar">
           <strong>{text.appTitle}</strong>
           <label className="language-switch">
@@ -362,13 +463,28 @@ export default function App({ initialBackendUrl = 'http://localhost:5590' }: App
             </select>
           </label>
         </header>
-        <LoginScreen
-          labels={text.login}
-          profiles={connectionProfiles}
-          isConnecting={isConnecting}
-          error={error}
-          onSubmit={handleLogin}
-        />
+        {appView === 'launcher' ? (
+          <LauncherScreen
+            labels={text.launcher}
+            profiles={connectionProfiles}
+            connectingId={isConnecting ? sshProfile?.id : null}
+            errors={launcherErrors}
+            onConnect={handleConnect}
+            onEdit={handleEditProfile}
+            onDelete={handleDeleteProfile}
+            onAdd={handleAddProfile}
+          />
+        ) : (
+          <ServerFormScreen
+            labels={text.serverForm}
+            profile={connectionProfiles.find((p) => p.id === editingProfileId)}
+            error={error}
+            isSaving={isSavingProfile}
+            onCancel={handleFormCancel}
+            onSave={handleSaveProfile}
+            onSaveAndConnect={handleSaveAndConnect}
+          />
+        )}
       </main>
     );
   }
@@ -459,6 +575,18 @@ function formatSize(size?: number) {
   if (size < 1024 * 1024) return `${(size / 1024).toFixed(1)} KB`;
   if (size < 1024 * 1024 * 1024) return `${(size / 1024 / 1024).toFixed(1)} MB`;
   return `${(size / 1024 / 1024 / 1024).toFixed(1)} GB`;
+}
+
+function pathAncestors(path: string): string[] {
+  const ancestors: string[] = [];
+  let current = path;
+  while (current && current !== '/') {
+    ancestors.push(current);
+    const lastSlash = current.lastIndexOf('/');
+    current = lastSlash === 0 ? '/' : current.slice(0, lastSlash);
+  }
+  ancestors.push('/');
+  return ancestors;
 }
 
 function isUsableFolderDownloadPlan(plan: unknown) {

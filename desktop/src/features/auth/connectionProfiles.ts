@@ -53,3 +53,11 @@ export const defaultConnectionProfiles: ConnectionProfile[] = [
 export function listConnectionProfiles() {
   return invoke<ConnectionProfile[]>('list_connection_profiles');
 }
+
+export function saveConnectionProfile(profile: ConnectionProfile) {
+  return invoke<ConnectionProfile[]>('save_connection_profile', { profile });
+}
+
+export function deleteConnectionProfile(id: string) {
+  return invoke<ConnectionProfile[]>('delete_connection_profile', { id });
+}
