@@ -58,6 +58,9 @@ interface Messages {
     aria2Secret: string;
     remoteTempDir: string;
     remoteDownloadService: string;
+    downloadServiceAuto: string;
+    downloadServiceRclone: string;
+    downloadServiceHttp: string;
     cancel: string;
     save: string;
     saveAndConnect: string;
@@ -163,6 +166,9 @@ export const messages: Record<Locale, Messages> = {
       aria2Secret: 'aria2 密钥，可选',
       remoteTempDir: '远程临时目录',
       remoteDownloadService: '远程下载服务',
+      downloadServiceAuto: '自动',
+      downloadServiceRclone: 'rclone serve',
+      downloadServiceHttp: '自定义 HTTP',
       cancel: '取消',
       save: '保存',
       saveAndConnect: '保存并连接',
@@ -264,6 +270,9 @@ export const messages: Record<Locale, Messages> = {
       aria2Secret: 'aria2 secret, optional',
       remoteTempDir: 'Remote temp directory',
       remoteDownloadService: 'Remote download service',
+      downloadServiceAuto: 'Auto',
+      downloadServiceRclone: 'rclone serve',
+      downloadServiceHttp: 'Custom HTTP',
       cancel: 'Cancel',
       save: 'Save',
       saveAndConnect: 'Save & connect',

@@ -40,6 +40,12 @@ describe('ServerFormScreen', () => {
     expect(onSave).not.toHaveBeenCalled();
   });
 
+  it('focuses the first invalid field after submitting an empty form', () => {
+    render(<ServerFormScreen labels={labels} onCancel={vi.fn()} onSave={vi.fn()} />);
+    fireEvent.click(screen.getByRole('button', { name: '保存' }));
+    expect(screen.getByLabelText('配置名称', { exact: false })).toHaveFocus();
+  });
+
   it('calls onSave with form values when valid', () => {
     const onSave = vi.fn();
     render(<ServerFormScreen labels={labels} onCancel={vi.fn()} onSave={onSave} />);

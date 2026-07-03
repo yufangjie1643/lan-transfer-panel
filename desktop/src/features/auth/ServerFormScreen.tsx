@@ -19,6 +19,9 @@ export interface ServerFormLabels {
   aria2Secret: string;
   remoteTempDir: string;
   remoteDownloadService: string;
+  downloadServiceAuto: string;
+  downloadServiceRclone: string;
+  downloadServiceHttp: string;
   cancel: string;
   save: string;
   saveAndConnect: string;
@@ -98,6 +101,7 @@ export function ServerFormScreen({
   const usernameRef = useRef<HTMLInputElement | null>(null);
   const passwordRef = useRef<HTMLInputElement | null>(null);
   const privateKeyPathRef = useRef<HTMLInputElement | null>(null);
+  const prevErrorsRef = useRef<string[]>([]);
 
   useEffect(() => {
     setLabel(initial.label);
@@ -112,7 +116,10 @@ export function ServerFormScreen({
   }, [initial]);
 
   useEffect(() => {
-    if (!Object.keys(errors).length) return;
+    const errorKeys = Object.keys(errors);
+    const hadErrorsBefore = prevErrorsRef.current.length > 0;
+    prevErrorsRef.current = errorKeys;
+    if (hadErrorsBefore || !errorKeys.length) return;
     const firstField: keyof FormErrors = errors.label
       ? 'label'
       : errors.host
@@ -315,9 +322,9 @@ export function ServerFormScreen({
               value={remoteDownloadService}
               onChange={(event) => setRemoteDownloadService(event.target.value)}
             >
-              <option value="auto">自动</option>
-              <option value="rclone">rclone serve</option>
-              <option value="http">自定义 HTTP</option>
+              <option value="auto">{labels.downloadServiceAuto}</option>
+              <option value="rclone">{labels.downloadServiceRclone}</option>
+              <option value="http">{labels.downloadServiceHttp}</option>
             </select>
           </label>
         </details>
