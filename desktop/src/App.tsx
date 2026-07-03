@@ -100,6 +100,7 @@ function buildRemoteTreeNodes(
 
 export default function App({ initialBackendUrl = 'http://localhost:5590' }: AppProps) {
   const [isConnecting, setIsConnecting] = useState(false);
+  const [connectingId, setConnectingId] = useState<string | null>(null);
   const [locale, setLocale] = useState<Locale>(defaultLocale);
   const [connectionProfiles, setConnectionProfiles] = useState<ConnectionProfile[]>(
     defaultConnectionProfiles
@@ -255,6 +256,7 @@ export default function App({ initialBackendUrl = 'http://localhost:5590' }: App
 
   async function handleConnect(credentials: ConnectionProfile) {
     setIsConnecting(true);
+    setConnectingId(credentials.id);
     setSshProfile(credentials);
     setError(null);
     setLauncherErrors((current) => {
@@ -282,6 +284,7 @@ export default function App({ initialBackendUrl = 'http://localhost:5590' }: App
       setError(message);
     } finally {
       setIsConnecting(false);
+      setConnectingId(null);
     }
   }
 
@@ -418,6 +421,7 @@ export default function App({ initialBackendUrl = 'http://localhost:5590' }: App
 
   function handleSwitchConnection() {
     client.logout().catch(() => undefined);
+    setConnectingId(null);
     setSshProfile(null);
     setSessionUsername(null);
     setRemoteItems('', '', []);
@@ -513,7 +517,7 @@ export default function App({ initialBackendUrl = 'http://localhost:5590' }: App
           <LauncherScreen
             labels={text.launcher}
             profiles={connectionProfiles}
-            connectingId={isConnecting ? sshProfile?.id : null}
+            connectingId={connectingId}
             errors={launcherErrors}
             onConnect={handleConnect}
             onEdit={handleEditProfile}

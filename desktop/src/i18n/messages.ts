@@ -68,6 +68,7 @@ interface Messages {
     password: string;
     privateKeyPath: string;
     passphrase: string;
+    saveCredential: string;
     advanced: string;
     aria2Rpc: string;
     aria2Secret: string;
@@ -194,6 +195,7 @@ export const messages: Record<Locale, Messages> = {
       password: '登录密码',
       privateKeyPath: '私钥路径',
       passphrase: '密钥密码，可选',
+      saveCredential: '保存此服务器配置',
       advanced: '高级设置',
       aria2Rpc: 'Windows aria2 RPC',
       aria2Secret: 'aria2 密钥，可选',
@@ -316,6 +318,7 @@ export const messages: Record<Locale, Messages> = {
       password: 'Login password',
       privateKeyPath: 'Private key path',
       passphrase: 'Key passphrase, optional',
+      saveCredential: 'Save this server profile',
       advanced: 'Advanced settings',
       aria2Rpc: 'Windows aria2 RPC',
       aria2Secret: 'aria2 secret, optional',

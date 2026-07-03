@@ -72,6 +72,34 @@ describe('ServerFormScreen', () => {
     expect(saved.port).toBe(2687);
     expect(saved.username).toBe('yufan');
     expect(saved.password).toBe('secret');
+    expect(saved.saveCredential).toBe(false);
+  });
+
+  it('defaults saveCredential to unchecked in add mode', () => {
+    render(<ServerFormScreen labels={labels} onCancel={vi.fn()} onSave={vi.fn()} />);
+    expect(screen.getByLabelText(labels.saveCredential)).not.toBeChecked();
+  });
+
+  it('reflects and updates the profile saveCredential value in edit mode', () => {
+    const onSave = vi.fn();
+    const profile: ConnectionProfile = {
+      id: 'p1',
+      label: 'home',
+      host: '10.42.0.1',
+      port: 22,
+      username: 'yufan',
+      authMethod: 'password',
+      password: 'secret',
+      saveCredential: true
+    };
+    render(<ServerFormScreen labels={labels} profile={profile} onCancel={vi.fn()} onSave={onSave} />);
+    const checkbox = screen.getByLabelText(labels.saveCredential);
+    expect(checkbox).toBeChecked();
+    fireEvent.click(checkbox);
+    fireEvent.change(screen.getByLabelText('配置名称'), { target: { value: 'home' } });
+    fireEvent.click(screen.getByRole('button', { name: '保存' }));
+    const saved: ConnectionProfile = onSave.mock.calls[0][0];
+    expect(saved.saveCredential).toBe(false);
   });
 
   it('calls onSaveAndConnect when that button is clicked', () => {

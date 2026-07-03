@@ -14,6 +14,7 @@ export interface ServerFormLabels {
   password: string;
   privateKeyPath: string;
   passphrase: string;
+  saveCredential: string;
   advanced: string;
   aria2Rpc: string;
   aria2Secret: string;
@@ -64,7 +65,7 @@ function emptyProfile(): ConnectionProfile {
     password: '',
     privateKeyPath: '',
     passphrase: '',
-    saveCredential: true
+    saveCredential: false
   };
 }
 
@@ -89,6 +90,7 @@ export function ServerFormScreen({
   const [password, setPassword] = useState(initial.password ?? '');
   const [privateKeyPath, setPrivateKeyPath] = useState(initial.privateKeyPath ?? '');
   const [passphrase, setPassphrase] = useState(initial.passphrase ?? '');
+  const [saveCredential, setSaveCredential] = useState(initial.saveCredential ?? false);
   const [aria2Rpc, setAria2Rpc] = useState('http://127.0.0.1:6800/jsonrpc');
   const [aria2Secret, setAria2Secret] = useState('');
   const [remoteTempDir, setRemoteTempDir] = useState('/tmp/lan-transfer');
@@ -112,6 +114,7 @@ export function ServerFormScreen({
     setPassword(initial.password ?? '');
     setPrivateKeyPath(initial.privateKeyPath ?? '');
     setPassphrase(initial.passphrase ?? '');
+    setSaveCredential(initial.saveCredential ?? false);
     setErrors({});
   }, [initial]);
 
@@ -153,7 +156,7 @@ export function ServerFormScreen({
       password: authMethod === 'password' ? password : '',
       privateKeyPath: authMethod === 'key' ? privateKeyPath : '',
       passphrase: authMethod === 'key' ? passphrase : '',
-      saveCredential: true
+      saveCredential
     };
   }
 
@@ -301,6 +304,14 @@ export function ServerFormScreen({
             {errors.credential ? <span className="field-error">{errors.credential}</span> : null}
           </>
         )}
+        <label className="save-credential-option">
+          <input
+            type="checkbox"
+            checked={saveCredential}
+            onChange={(event) => setSaveCredential(event.target.checked)}
+          />
+          {labels.saveCredential}
+        </label>
         <details className="advanced-settings">
           <summary>{labels.advanced}</summary>
           <label>
