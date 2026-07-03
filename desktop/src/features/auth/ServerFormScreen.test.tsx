@@ -46,6 +46,16 @@ describe('ServerFormScreen', () => {
     expect(screen.getByLabelText('配置名称', { exact: false })).toHaveFocus();
   });
 
+  it('focuses the next invalid field after the first error is fixed', () => {
+    render(<ServerFormScreen labels={labels} onCancel={vi.fn()} onSave={vi.fn()} />);
+    fireEvent.click(screen.getByRole('button', { name: '保存' }));
+    fireEvent.change(screen.getByLabelText('配置名称', { exact: false }), {
+      target: { value: 'home' }
+    });
+    fireEvent.click(screen.getByRole('button', { name: '保存' }));
+    expect(screen.getByLabelText('服务器地址', { exact: false })).toHaveFocus();
+  });
+
   it('calls onSave with form values when valid', () => {
     const onSave = vi.fn();
     render(<ServerFormScreen labels={labels} onCancel={vi.fn()} onSave={onSave} />);

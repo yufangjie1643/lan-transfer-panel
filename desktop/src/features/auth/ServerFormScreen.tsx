@@ -117,9 +117,12 @@ export function ServerFormScreen({
 
   useEffect(() => {
     const errorKeys = Object.keys(errors);
-    const hadErrorsBefore = prevErrorsRef.current.length > 0;
+    const prevKeys = prevErrorsRef.current;
+    const keysChanged =
+      errorKeys.length !== prevKeys.length ||
+      errorKeys.some((key, index) => key !== prevKeys[index]);
     prevErrorsRef.current = errorKeys;
-    if (hadErrorsBefore || !errorKeys.length) return;
+    if (!errorKeys.length || !keysChanged) return;
     const firstField: keyof FormErrors = errors.label
       ? 'label'
       : errors.host
