@@ -12,3 +12,4 @@ desktop/src-tauri/gen/
 desktop/src-tauri/target/
 desktop/.dev-logs/
 .DS_Store
+.worktrees/
