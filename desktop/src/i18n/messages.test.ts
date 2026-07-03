@@ -13,4 +13,14 @@ describe('messages', () => {
   it('keeps English fallback strings available', () => {
     expect(messages['en-US'].connection.connect).toBe('Connect');
   });
+
+  it('has launcher labels in both locales', () => {
+    expect(messages['zh-CN'].launcher.title).toBeTypeOf('string');
+    expect(messages['en-US'].launcher.title).toBeTypeOf('string');
+  });
+
+  it('has serverForm validation labels in both locales', () => {
+    expect(messages['zh-CN'].serverForm.validation.hostRequired).toBeTypeOf('string');
+    expect(messages['en-US'].serverForm.validation.hostRequired).toBeTypeOf('string');
+  });
 });

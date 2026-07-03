@@ -29,6 +29,47 @@ interface Messages {
     connect: string;
     connecting: string;
   };
+  launcher: {
+    title: string;
+    emptyTitle: string;
+    emptySubtitle: string;
+    addServer: string;
+    connect: string;
+    connecting: string;
+    edit: string;
+    delete: string;
+    confirmDelete: string;
+  };
+  serverForm: {
+    titleAdd: string;
+    titleEdit: string;
+    label: string;
+    host: string;
+    port: string;
+    username: string;
+    authMethod: string;
+    passwordAuth: string;
+    keyAuth: string;
+    password: string;
+    privateKeyPath: string;
+    passphrase: string;
+    advanced: string;
+    aria2Rpc: string;
+    aria2Secret: string;
+    remoteTempDir: string;
+    remoteDownloadService: string;
+    cancel: string;
+    save: string;
+    saveAndConnect: string;
+    validation: {
+      labelRequired: string;
+      hostRequired: string;
+      portInvalid: string;
+      usernameRequired: string;
+      passwordRequired: string;
+      privateKeyRequired: string;
+    };
+  };
   panes: {
     local: string;
     localTree: string;
@@ -75,7 +116,7 @@ export const messages: Record<Locale, Messages> = {
       region: '连接设置',
       backendUrl: '后端地址',
       username: '用户名',
-      password: '密码',
+      password: '登录密码',
       connect: '连接',
       disconnected: '未连接',
       connecting: '连接中...',
@@ -92,6 +133,47 @@ export const messages: Record<Locale, Messages> = {
       password: '密码',
       connect: '连接',
       connecting: '连接中...'
+    },
+    launcher: {
+      title: '选择服务器',
+      emptyTitle: '还没有保存的服务器',
+      emptySubtitle: '点击下方按钮添加第一台服务器',
+      addServer: '添加服务器',
+      connect: '连接',
+      connecting: '连接中...',
+      edit: '编辑',
+      delete: '删除',
+      confirmDelete: '确认删除？'
+    },
+    serverForm: {
+      titleAdd: '添加服务器',
+      titleEdit: '编辑服务器',
+      label: '配置名称',
+      host: '服务器地址',
+      port: 'SSH 端口',
+      username: '用户名',
+      authMethod: '认证方式',
+      passwordAuth: '密码',
+      keyAuth: 'SSH 密钥',
+      password: '登录密码',
+      privateKeyPath: '私钥路径',
+      passphrase: '密钥密码，可选',
+      advanced: '高级设置',
+      aria2Rpc: 'Windows aria2 RPC',
+      aria2Secret: 'aria2 密钥，可选',
+      remoteTempDir: '远程临时目录',
+      remoteDownloadService: '远程下载服务',
+      cancel: '取消',
+      save: '保存',
+      saveAndConnect: '保存并连接',
+      validation: {
+        labelRequired: '请输入配置名称',
+        hostRequired: '请输入服务器地址',
+        portInvalid: '端口号必须在 1–65535 之间',
+        usernameRequired: '请输入用户名',
+        passwordRequired: '请输入登录密码',
+        privateKeyRequired: '请输入私钥路径'
+      }
     },
     panes: {
       local: '本地文件',
@@ -135,7 +217,7 @@ export const messages: Record<Locale, Messages> = {
       region: 'Connection',
       backendUrl: 'Backend URL',
       username: 'Username',
-      password: 'Password',
+      password: 'Login password',
       connect: 'Connect',
       disconnected: 'Disconnected',
       connecting: 'Connecting...',
@@ -152,6 +234,47 @@ export const messages: Record<Locale, Messages> = {
       password: 'Password',
       connect: 'Connect',
       connecting: 'Connecting...'
+    },
+    launcher: {
+      title: 'Select server',
+      emptyTitle: 'No saved servers',
+      emptySubtitle: 'Add your first server below',
+      addServer: 'Add server',
+      connect: 'Connect',
+      connecting: 'Connecting...',
+      edit: 'Edit',
+      delete: 'Delete',
+      confirmDelete: 'Confirm delete?'
+    },
+    serverForm: {
+      titleAdd: 'Add server',
+      titleEdit: 'Edit server',
+      label: 'Profile name',
+      host: 'Server address',
+      port: 'SSH port',
+      username: 'Username',
+      authMethod: 'Authentication',
+      passwordAuth: 'Password',
+      keyAuth: 'SSH key',
+      password: 'Login password',
+      privateKeyPath: 'Private key path',
+      passphrase: 'Key passphrase, optional',
+      advanced: 'Advanced settings',
+      aria2Rpc: 'Windows aria2 RPC',
+      aria2Secret: 'aria2 secret, optional',
+      remoteTempDir: 'Remote temp directory',
+      remoteDownloadService: 'Remote download service',
+      cancel: 'Cancel',
+      save: 'Save',
+      saveAndConnect: 'Save & connect',
+      validation: {
+        labelRequired: 'Profile name is required',
+        hostRequired: 'Server address is required',
+        portInvalid: 'Port must be between 1 and 65535',
+        usernameRequired: 'Username is required',
+        passwordRequired: 'Login password is required',
+        privateKeyRequired: 'Private key path is required'
+      }
     },
     panes: {
       local: 'Local files',
