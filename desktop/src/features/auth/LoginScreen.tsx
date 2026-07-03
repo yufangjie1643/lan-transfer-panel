@@ -31,11 +31,15 @@ export function LoginScreen({
     id: 'custom',
     label: 'Custom',
     backendUrl: '',
+    host: '',
+    port: 22,
     username: '',
-    password: ''
+    password: '',
+    authMethod: 'password' as const,
+    saveCredential: true
   };
   const [selectedProfileId, setSelectedProfileId] = useState(firstProfile.id);
-  const [backendUrl, setBackendUrl] = useState(firstProfile.backendUrl);
+  const [backendUrl, setBackendUrl] = useState(firstProfile.backendUrl ?? '');
   const [username, setUsername] = useState(firstProfile.username);
   const [password, setPassword] = useState(firstProfile.password);
 
@@ -44,7 +48,7 @@ export function LoginScreen({
       profiles.find((profile) => profile.id === selectedProfileId) ?? profiles[0];
     if (!selectedProfile) return;
     setSelectedProfileId(selectedProfile.id);
-    setBackendUrl(selectedProfile.backendUrl);
+    setBackendUrl(selectedProfile.backendUrl ?? '');
     setUsername(selectedProfile.username);
     setPassword(selectedProfile.password);
   }, [profiles, selectedProfileId]);
@@ -53,7 +57,7 @@ export function LoginScreen({
     const nextProfile = profiles.find((profile) => profile.id === profileId);
     if (!nextProfile) return;
     setSelectedProfileId(nextProfile.id);
-    setBackendUrl(nextProfile.backendUrl);
+    setBackendUrl(nextProfile.backendUrl ?? '');
     setUsername(nextProfile.username);
     setPassword(nextProfile.password);
   }
