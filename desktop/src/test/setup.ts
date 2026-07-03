@@ -19,16 +19,6 @@ vi.mock('@tauri-apps/api/core', () => ({
           privateKeyPath: 'C:\\Users\\admin\\.ssh\\id_ed25519_local',
           password: '',
           saveCredential: false
-        },
-        {
-          id: 'custom',
-          label: '自定义连接',
-          host: '',
-          port: 22,
-          username: '',
-          authMethod: 'password',
-          password: '',
-          saveCredential: false
         }
       ]);
     }

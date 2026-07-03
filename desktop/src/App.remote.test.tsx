@@ -15,14 +15,16 @@ describe('remote shell after SSH login', () => {
       remotePath: '',
       remoteItems: [],
       selectedRemoteKeys: new Set(),
-      error: null
+      error: null,
+      appView: 'launcher',
+      editingProfileId: undefined
     });
   });
 
   it('enters the remote file shell after submitting SSH credentials', async () => {
     render(<App />);
 
-    await waitFor(() => expect(screen.getByLabelText('用户名')).toHaveValue('yufan'));
+    await waitFor(() => expect(screen.getByText('yufanssh')).toBeInTheDocument());
     fireEvent.click(screen.getByRole('button', { name: '连接' }));
 
     await waitFor(() => expect(screen.getByText('已连接：yufan@10.42.0.1:2687')).toBeInTheDocument());
@@ -38,7 +40,7 @@ describe('remote shell after SSH login', () => {
   it('downloads a remote file through SSH after choosing a local directory', async () => {
     render(<App />);
 
-    await waitFor(() => expect(screen.getByLabelText('用户名')).toHaveValue('yufan'));
+    await waitFor(() => expect(screen.getByText('yufanssh')).toBeInTheDocument());
     fireEvent.click(screen.getByRole('button', { name: '连接' }));
     await waitFor(() => expect(screen.getByText('logs_2.sqlite')).toBeInTheDocument());
 
@@ -65,7 +67,7 @@ describe('remote shell after SSH login', () => {
   it('keeps folder downloads available from the download button', async () => {
     render(<App />);
 
-    await waitFor(() => expect(screen.getByLabelText('用户名')).toHaveValue('yufan'));
+    await waitFor(() => expect(screen.getByText('yufanssh')).toBeInTheDocument());
     fireEvent.click(screen.getByRole('button', { name: '连接' }));
     await waitFor(() =>
       expect(screen.getByRole('button', { name: '下载到... .codex' })).toBeInTheDocument()
@@ -94,7 +96,7 @@ describe('remote shell after SSH login', () => {
   it('opens the desktop transfer queue after SSH login', async () => {
     render(<App />);
 
-    await waitFor(() => expect(screen.getByLabelText('用户名')).toHaveValue('yufan'));
+    await waitFor(() => expect(screen.getByText('yufanssh')).toBeInTheDocument());
     fireEvent.click(screen.getByRole('button', { name: '连接' }));
     await waitFor(() => expect(screen.getByText('已连接：yufan@10.42.0.1:2687')).toBeInTheDocument());
     fireEvent.click(screen.getByRole('button', { name: '传输队列' }));
