@@ -454,23 +454,6 @@ async fn sftp_ensure_dir(connection: &sftp::SftpConnection, remote_path: &str) -
 }
 
 #[tauri::command]
-async fn upload_ssh_file(
-    profile: ConnectionProfile,
-    remote_dir: String,
-    local_path: String,
-    name: String,
-) -> Result<(), String> {
-    let remote_path = if remote_dir.ends_with('/') {
-        format!("{}{}", remote_dir, name)
-    } else {
-        format!("{}/{}", remote_dir, name)
-    };
-    let conn = sftp::connect(&profile).await?;
-    let guard = conn.lock().await;
-    sftp_copy_from_local(&*guard, std::path::Path::new(&local_path), &remote_path).await
-}
-
-#[tauri::command]
 async fn upload_ssh_entries(
     profile: ConnectionProfile,
     remote_dir: String,
@@ -518,7 +501,7 @@ fn run_scp_download_to_target(
     recursive: bool,
 ) -> Result<String, String> {
     if profile.auth_method != "key" {
-        return Err("当前桌面端下载先支持 SSH 密钥认证。".to_string());
+        return Err("当前桌面端文件夹下载先支持 SSH 密钥认证。".to_string());
     }
     let host = profile.host.trim();
     let username = profile.username.trim();
@@ -581,7 +564,7 @@ fn start_ssh_download_task(
     size: Option<u64>,
 ) -> Result<String, String> {
     if profile.auth_method != "key" {
-        return Err("当前桌面端下载先支持 SSH 密钥认证。".to_string());
+        return Err("当前桌面端文件夹下载先支持 SSH 密钥认证。".to_string());
     }
     let id = TRANSFER_COUNTER.fetch_add(1, Ordering::Relaxed);
     let gid = format!("ssh-{}-{}", id, safe_task_name(&name));
@@ -778,7 +761,6 @@ fn main() {
             list_local_directory,
             collect_upload_entries,
             select_upload_files,
-            upload_ssh_file,
             upload_ssh_entries,
             select_download_directory,
             download_ssh_file,

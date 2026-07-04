@@ -123,20 +123,37 @@ pub fn connection_key(profile: &ConnectionProfile) -> String {
 
 pub async fn connect(profile: &ConnectionProfile) -> Result<Arc<tokio::sync::Mutex<SftpConnection>>, String> {
     let key = connection_key(profile);
-    let mut pool = POOL.lock().await;
-    if let Some(entry) = pool.get(&key) {
-        let guard = entry.lock().await;
-        if guard.sftp.canonicalize(".").await.is_ok() {
-            return Ok(entry.clone());
-        }
-        drop(guard);
-        pool.remove(&key);
-    }
 
-    let connection = do_connect(profile).await?;
-    let entry = Arc::new(tokio::sync::Mutex::new(connection));
-    pool.insert(key, entry.clone());
-    Ok(entry)
+    loop {
+        let entry = {
+            let pool = POOL.lock().await;
+            pool.get(&key).cloned()
+        };
+
+        if let Some(entry) = entry {
+            let guard = entry.lock().await;
+            if guard.sftp.canonicalize(".").await.is_ok() {
+                return Ok(entry.clone());
+            }
+            drop(guard);
+            {
+                let mut pool = POOL.lock().await;
+                pool.remove(&key);
+            }
+            continue;
+        }
+
+        let connection = do_connect(profile).await?;
+        let new_entry = Arc::new(tokio::sync::Mutex::new(connection));
+        {
+            let mut pool = POOL.lock().await;
+            if let Some(existing) = pool.get(&key) {
+                return Ok(existing.clone());
+            }
+            pool.insert(key, new_entry.clone());
+        }
+        return Ok(new_entry);
+    }
 }
 
 async fn do_connect(profile: &ConnectionProfile) -> Result<SftpConnection, String> {
