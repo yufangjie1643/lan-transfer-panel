@@ -646,9 +646,48 @@ fn safe_task_name(value: &str) -> String {
     }
 }
 
+async fn sftp_copy_to_local(
+    profile: &ConnectionProfile,
+    remote_path: &str,
+    local_path: &std::path::Path,
+) -> Result<(), String> {
+    let conn = sftp::connect(&sftp_profile(profile)).await?;
+    let guard = conn.lock().await;
+    let meta = guard
+        .sftp
+        .metadata(remote_path)
+        .await
+        .map_err(|e| format!("获取远程文件信息失败: {}", e))?;
+    if meta.is_dir() {
+        return Err("远程路径是目录，请使用文件夹下载".to_string());
+    }
+    let mut remote = guard
+        .sftp
+        .open(remote_path)
+        .await
+        .map_err(|e| format!("打开远程文件失败: {}", e))?;
+    let mut local = tokio::fs::File::create(local_path)
+        .await
+        .map_err(|e| format!("创建本地文件失败: {}", e))?;
+    tokio::io::copy(&mut remote, &mut local)
+        .await
+        .map_err(|e| format!("下载文件失败: {}", e))?;
+    Ok(())
+}
+
 #[tauri::command]
-fn download_ssh_file(profile: ConnectionProfile, remote_path: String, local_dir: String) -> Result<String, String> {
-    run_scp_download(profile, remote_path, local_dir, false)
+async fn download_ssh_file(
+    profile: ConnectionProfile,
+    remote_path: String,
+    local_dir: String,
+) -> Result<String, String> {
+    let name = std::path::Path::new(&remote_path)
+        .file_name()
+        .map(|s| s.to_string_lossy().to_string())
+        .unwrap_or_else(|| "download".to_string());
+    let local_path = std::path::Path::new(&local_dir).join(safe_local_file_name(&name));
+    sftp_copy_to_local(&profile, &remote_path, &local_path).await?;
+    Ok(local_path.to_string_lossy().to_string())
 }
 
 #[tauri::command]
@@ -657,20 +696,17 @@ fn download_ssh_folder(profile: ConnectionProfile, remote_path: String, local_di
 }
 
 #[tauri::command]
-fn prepare_ssh_virtual_file(profile: ConnectionProfile, remote_path: String, name: String) -> Result<String, String> {
+async fn prepare_ssh_virtual_file(
+    profile: ConnectionProfile,
+    remote_path: String,
+    name: String,
+) -> Result<String, String> {
     let staging_dir = std::env::temp_dir()
         .join("lan-transfer-virtual-drag")
         .join(format!("{}", std::process::id()));
     fs::create_dir_all(&staging_dir).map_err(|err| err.to_string())?;
     let local_path = staging_dir.join(safe_local_file_name(&name));
-    run_scp_download_to_target(
-        profile,
-        remote_path,
-        local_path
-            .to_string_lossy()
-            .to_string(),
-        false,
-    )?;
+    sftp_copy_to_local(&profile, &remote_path, &local_path).await?;
     Ok(local_path.to_string_lossy().to_string())
 }
 
