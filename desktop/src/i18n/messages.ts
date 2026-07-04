@@ -144,6 +144,7 @@ interface Messages {
     statusBar: {
       items: (count: number) => string;
       selected: (count: number) => string;
+      loading: string;
     };
   };
   errors: {
@@ -300,7 +301,8 @@ export const messages: Record<Locale, Messages> = {
       },
       statusBar: {
         items: (count) => `${count} 个项目`,
-        selected: (count) => `已选择 ${count} 个项目`
+        selected: (count) => `已选择 ${count} 个`,
+        loading: '加载中...'
       }
     },
     errors: {
@@ -453,7 +455,8 @@ export const messages: Record<Locale, Messages> = {
       },
       statusBar: {
         items: (count) => `${count} items`,
-        selected: (count) => `${count} selected`
+        selected: (count) => `${count} selected`,
+        loading: 'Loading...'
       }
     },
     errors: {
