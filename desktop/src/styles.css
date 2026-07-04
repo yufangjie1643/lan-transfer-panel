@@ -9,7 +9,8 @@ body {
 }
 
 .app-shell {
-  min-height: 100vh;
+  height: 100vh;
+  overflow: hidden;
   display: grid;
   grid-template-rows: 44px auto minmax(0, 1fr);
 }
@@ -653,7 +654,8 @@ body {
 /* Explorer layout */
 
 .explorer-toolbar {
-  position: relative;
+  position: sticky;
+  top: 0;
   z-index: 2;
   display: flex;
   align-items: center;
@@ -697,7 +699,8 @@ body {
 }
 
 .explorer-address-bar {
-  position: relative;
+  position: sticky;
+  top: 40px;
   z-index: 2;
   display: flex;
   align-items: center;
