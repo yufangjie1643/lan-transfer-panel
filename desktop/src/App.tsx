@@ -255,6 +255,7 @@ export default function App({ initialBackendUrl = 'http://localhost:5590' }: App
       setRemotes(['server']);
       setRemoteTreeChildren({});
       setExpandedRemotePaths(new Set(pathAncestors(root)));
+      setSelectedRemoteKeys(new Set());
       await loadSshDirectory(credentials, root);
       setRemoteHistory([root]);
       setRemoteHistoryIndex(0);
@@ -320,6 +321,7 @@ export default function App({ initialBackendUrl = 'http://localhost:5590' }: App
     setSshProfile(null);
     setSessionUsername(null);
     setRemoteItems('', '', []);
+    setSelectedRemoteKeys(new Set());
     setRemoteTreeChildren({});
     setExpandedRemotePaths(new Set(['/']));
     setRemoteHistory([]);
