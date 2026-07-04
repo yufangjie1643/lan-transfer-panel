@@ -1,8 +1,9 @@
-import { useRef } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import { File, Folder } from 'lucide-react';
 
 export type FileListSortKey = 'name' | 'modified' | 'size';
 export type FileListSortDirection = 'asc' | 'desc';
+type ColumnKey = 'name' | 'modified' | 'type' | 'size';
 
 export interface ExplorerFileListLabels {
   name: string;
@@ -41,6 +42,22 @@ interface FileListProps {
   onNativeDragStart?: (key: string) => boolean;
 }
 
+const COLUMN_ORDER: ColumnKey[] = ['name', 'modified', 'type', 'size'];
+const DEFAULT_WIDTHS: Record<ColumnKey, number> = {
+  name: 240,
+  modified: 120,
+  type: 100,
+  size: 90
+};
+const MIN_WIDTHS: Record<ColumnKey, number> = {
+  name: 80,
+  modified: 80,
+  type: 60,
+  size: 60
+};
+const HIDABLE_COLUMNS: ColumnKey[] = ['modified', 'type', 'size'];
+const STORAGE_KEY = 'lan-transfer-file-list-columns';
+
 export function FileList({
   labels,
   items,
@@ -57,8 +74,90 @@ export function FileList({
   onNativeDragStart
 }: FileListProps) {
   const lastSelectedRef = useRef<string | null>(null);
+  const resizingRef = useRef<{ key: ColumnKey; startX: number; startWidth: number } | null>(null);
+  const menuRef = useRef<HTMLDivElement | null>(null);
+
+  const [columnWidths, setColumnWidths] = useState<Record<ColumnKey, number>>(() => {
+    try {
+      const saved = localStorage.getItem(STORAGE_KEY);
+      if (saved) {
+        const parsed = JSON.parse(saved);
+        return { ...DEFAULT_WIDTHS, ...(parsed.widths || {}) };
+      }
+    } catch {}
+    return { ...DEFAULT_WIDTHS };
+  });
+
+  const [visibleColumns, setVisibleColumns] = useState<Record<ColumnKey, boolean>>(() => {
+    try {
+      const saved = localStorage.getItem(STORAGE_KEY);
+      if (saved) {
+        const parsed = JSON.parse(saved);
+        return { name: true, modified: true, type: true, size: true, ...(parsed.visible || {}) };
+      }
+    } catch {}
+    return { name: true, modified: true, type: true, size: true };
+  });
+
+  const [menuOpen, setMenuOpen] = useState(false);
+  const [menuPosition, setMenuPosition] = useState({ left: 0, top: 0 });
+
+  useEffect(() => {
+    try {
+      localStorage.setItem(
+        STORAGE_KEY,
+        JSON.stringify({ widths: columnWidths, visible: visibleColumns })
+      );
+    } catch {}
+  }, [columnWidths, visibleColumns]);
+
+  useEffect(() => {
+    function handleClickOutside(event: MouseEvent) {
+      if (menuRef.current && !menuRef.current.contains(event.target as Node)) {
+        setMenuOpen(false);
+      }
+    }
+    if (menuOpen) {
+      window.addEventListener('mousedown', handleClickOutside);
+      return () => window.removeEventListener('mousedown', handleClickOutside);
+    }
+  }, [menuOpen]);
 
   const allSelected = items.length > 0 && items.every((item) => selectedKeys.has(item.key));
+
+  const visibleColumnKeys = COLUMN_ORDER.filter((key) => visibleColumns[key]);
+  const gridTemplateColumns = ['32px', ...visibleColumnKeys.map((key) => `${columnWidths[key]}px`)].join(' ');
+
+  const handleResizeMove = useCallback((event: MouseEvent) => {
+    if (!resizingRef.current) return;
+    const { key, startX, startWidth } = resizingRef.current;
+    const nextWidth = Math.max(MIN_WIDTHS[key], startWidth + event.clientX - startX);
+    setColumnWidths((current) => ({ ...current, [key]: nextWidth }));
+  }, []);
+
+  const handleResizeEnd = useCallback(() => {
+    resizingRef.current = null;
+    window.removeEventListener('mousemove', handleResizeMove);
+    window.removeEventListener('mouseup', handleResizeEnd);
+  }, [handleResizeMove]);
+
+  function handleResizeStart(key: ColumnKey, event: React.MouseEvent) {
+    event.preventDefault();
+    event.stopPropagation();
+    resizingRef.current = { key, startX: event.clientX, startWidth: columnWidths[key] };
+    window.addEventListener('mousemove', handleResizeMove);
+    window.addEventListener('mouseup', handleResizeEnd);
+  }
+
+  function handleHeaderContextMenu(event: React.MouseEvent) {
+    event.preventDefault();
+    setMenuPosition({ left: event.clientX, top: event.clientY });
+    setMenuOpen(true);
+  }
+
+  function toggleColumn(key: ColumnKey) {
+    setVisibleColumns((current) => ({ ...current, [key]: !current[key] }));
+  }
 
   function handleRowClick(item: FileListItem, event: React.MouseEvent) {
     if (event.shiftKey && lastSelectedRef.current) {
@@ -83,6 +182,43 @@ export function FileList({
     return labels.file;
   }
 
+  function renderCell(key: ColumnKey, item: FileListItem) {
+    if (key === 'name') {
+      return (
+        <div role="gridcell" className="file-cell-name" key={key}>
+          {item.isDir ? <Folder size={16} /> : <File size={16} />}
+          <span>{item.name}</span>
+        </div>
+      );
+    }
+    if (key === 'modified') {
+      return <div role="gridcell" key={key}>{item.modified ? new Date(item.modified).toLocaleDateString() : '—'}</div>;
+    }
+    if (key === 'type') {
+      return <div role="gridcell" key={key}>{formatType(item)}</div>;
+    }
+    return <div role="gridcell" key={key}>{formatSize(item.size)}</div>;
+  }
+
+  function renderHeader(key: ColumnKey) {
+    const isSortable = key === 'name' || key === 'size';
+    return (
+      <div
+        role="columnheader"
+        key={key}
+        className={isSortable && sortKey === key ? `sorted-${sortDirection}` : ''}
+        onClick={isSortable ? () => onSort(key) : undefined}
+      >
+        {labels[key]}
+        <span
+          className="column-resize-handle"
+          onMouseDown={(event) => handleResizeStart(key, event)}
+          aria-hidden="true"
+        />
+      </div>
+    );
+  }
+
   if (isLoading) {
     return <div className="file-list file-list-loading">{labels.loading}</div>;
   }
@@ -93,7 +229,12 @@ export function FileList({
 
   return (
     <div className="file-list" role="grid">
-      <div className="file-list-header" role="row">
+      <div
+        className="file-list-header"
+        role="row"
+        style={{ gridTemplateColumns }}
+        onContextMenu={handleHeaderContextMenu}
+      >
         <div role="columnheader">
           <input
             type="checkbox"
@@ -102,14 +243,7 @@ export function FileList({
             onChange={onToggleSelectAll}
           />
         </div>
-        <div role="columnheader" className={sortKey === 'name' ? `sorted-${sortDirection}` : ''} onClick={() => onSort('name')}>
-          {labels.name}
-        </div>
-        <div role="columnheader">{labels.modified}</div>
-        <div role="columnheader">{labels.type}</div>
-        <div role="columnheader" className={sortKey === 'size' ? `sorted-${sortDirection}` : ''} onClick={() => onSort('size')}>
-          {labels.size}
-        </div>
+        {visibleColumnKeys.map(renderHeader)}
       </div>
       <div className="file-list-body">
         {items.map((item) => (
@@ -117,6 +251,7 @@ export function FileList({
             key={item.key}
             className={selectedKeys.has(item.key) ? 'file-row selected' : 'file-row'}
             role="row"
+            style={{ gridTemplateColumns }}
             draggable={!item.isDir}
             onClick={(event) => handleRowClick(item, event)}
             onDoubleClick={() => onDoubleClick(item)}
@@ -133,16 +268,30 @@ export function FileList({
                 onChange={(event) => onSelect(item.key, event)}
               />
             </div>
-            <div role="gridcell" className="file-cell-name">
-              {item.isDir ? <Folder size={16} /> : <File size={16} />}
-              <span>{item.name}</span>
-            </div>
-            <div role="gridcell">{item.modified ? new Date(item.modified).toLocaleDateString() : '—'}</div>
-            <div role="gridcell">{formatType(item)}</div>
-            <div role="gridcell">{formatSize(item.size)}</div>
+            {visibleColumnKeys.map((key) => renderCell(key, item))}
           </div>
         ))}
       </div>
+      {menuOpen ? (
+        <div
+          ref={menuRef}
+          className="column-menu"
+          style={{ left: menuPosition.left, top: menuPosition.top }}
+          role="menu"
+        >
+          <div className="column-menu-title">显示列</div>
+          {HIDABLE_COLUMNS.map((key) => (
+            <label key={key} className="column-menu-item">
+              <input
+                type="checkbox"
+                checked={visibleColumns[key]}
+                onChange={() => toggleColumn(key)}
+              />
+              <span>{labels[key]}</span>
+            </label>
+          ))}
+        </div>
+      ) : null}
     </div>
   );
 }
