@@ -630,7 +630,7 @@ fn safe_local_file_name(value: &str) -> String {
 }
 
 #[tauri::command]
-fn open_devtools(window: tauri::Window) {
+fn open_devtools(window: tauri::WebviewWindow) {
     #[cfg(debug_assertions)]
     window.open_devtools();
     #[cfg(not(debug_assertions))]
