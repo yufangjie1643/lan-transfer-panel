@@ -121,7 +121,13 @@ export default function App({ initialBackendUrl = 'http://localhost:5590' }: App
   const [explorerSettings, setExplorerSettings] = useState<ExplorerSettings>(loadExplorerSettings);
   const [settingsOpen, setSettingsOpen] = useState(false);
   const directoryCache = useRef(new DirectoryCache());
+  const backgroundAbortRef = useRef<AbortController | null>(null);
   const text = messages[locale];
+
+  function abortBackgroundTasks() {
+    backgroundAbortRef.current?.abort();
+    backgroundAbortRef.current = new AbortController();
+  }
   const appView = useAppStore((state) => state.appView);
   const editingProfileId = useAppStore((state) => state.editingProfileId);
   const setAppView = useAppStore((state) => state.setAppView);
@@ -172,20 +178,33 @@ export default function App({ initialBackendUrl = 'http://localhost:5590' }: App
 
   useEffect(() => {
     if (!explorerSettings.autoRefreshEnabled || !sshProfile) return undefined;
-    const interval = setInterval(() => {
-      const ttl = explorerSettings.cacheTtlSeconds * 1000;
-      for (const path of directoryCache.current.paths()) {
-        const cached = directoryCache.current.get(path, ttl);
-        if (!cached) continue;
-        listSshDirectory(sshProfile, path)
-          .then((listing) => {
+    const refreshLockRef = { current: false };
+    const interval = setInterval(async () => {
+      if (refreshLockRef.current) return;
+      const signal = backgroundAbortRef.current?.signal;
+      if (!signal || signal.aborted) return;
+      refreshLockRef.current = true;
+      try {
+        const ttl = explorerSettings.cacheTtlSeconds * 1000;
+        for (const path of directoryCache.current.paths()) {
+          if (signal.aborted) break;
+          const cached = directoryCache.current.get(path, ttl);
+          if (!cached) continue;
+          try {
+            // eslint-disable-next-line no-await-in-loop
+            const listing = await listSshDirectory(sshProfile, path);
+            if (signal.aborted) break;
             directoryCache.current.set(path, listing);
             setRemoteTreeChildren((current) => ({ ...current, [listing.path]: listing.list }));
             if (path === normalizeAbsolutePath(remotePath)) {
               setRemoteItems('server', listing.path, listing.list);
             }
-          })
-          .catch(() => undefined);
+          } catch {
+            // ignore refresh failures for individual directories
+          }
+        }
+      } finally {
+        refreshLockRef.current = false;
       }
     }, explorerSettings.autoRefreshIntervalSeconds * 1000);
     return () => clearInterval(interval);
@@ -221,21 +240,30 @@ export default function App({ initialBackendUrl = 'http://localhost:5590' }: App
   );
 
   const preloadChildren = useCallback(
-    (profile: ConnectionProfile, listing: SshDirectoryListing, depth: number) => {
+    async (
+      profile: ConnectionProfile,
+      listing: SshDirectoryListing,
+      depth: number,
+      signal: AbortSignal
+    ) => {
       if (depth <= 0 || !explorerSettings.cacheEnabled || !explorerSettings.preloadEnabled) return;
       for (const item of listing.list) {
+        if (signal.aborted) break;
         if (!item.IsDir) continue;
         const childPath = item.Path || item.Name;
         if (directoryCache.current.has(childPath)) continue;
-        listSshDirectory(profile, childPath)
-          .then((childListing) => {
-            directoryCache.current.set(childPath, childListing);
-            setRemoteTreeChildren((current) => ({
-              ...current,
-              [childListing.path]: childListing.list
-            }));
-          })
-          .catch(() => undefined);
+        try {
+          // eslint-disable-next-line no-await-in-loop
+          const childListing = await listSshDirectory(profile, childPath);
+          if (signal.aborted) break;
+          directoryCache.current.set(childPath, childListing);
+          setRemoteTreeChildren((current) => ({
+            ...current,
+            [childListing.path]: childListing.list
+          }));
+        } catch {
+          // ignore preload failures
+        }
       }
     },
     [explorerSettings.cacheEnabled, explorerSettings.preloadEnabled]
@@ -255,10 +283,11 @@ export default function App({ initialBackendUrl = 'http://localhost:5590' }: App
         reportSshFilesPending();
         return;
       }
+      abortBackgroundTasks();
       setIsRemoteLoading(true);
       try {
         const listing = await loadSshDirectory(sshProfile, normalizeAbsolutePath(path));
-        preloadChildren(sshProfile, listing, explorerSettings.preloadDepth);
+        preloadChildren(sshProfile, listing, explorerSettings.preloadDepth, backgroundAbortRef.current!.signal);
         const nextPath = listing.path;
         if (mode === 'history') return;
         setRemoteHistory((current) => {
@@ -354,10 +383,12 @@ export default function App({ initialBackendUrl = 'http://localhost:5590' }: App
       setRemoteTreeChildren({});
       setExpandedRemotePaths(new Set(pathAncestors(root)));
       setSelectedRemoteKeys(new Set());
+      directoryCache.current.clear();
+      abortBackgroundTasks();
       setIsRemoteLoading(true);
       try {
         const rootListing = await loadSshDirectory(credentials, root);
-        preloadChildren(credentials, rootListing, explorerSettings.preloadDepth);
+        preloadChildren(credentials, rootListing, explorerSettings.preloadDepth, backgroundAbortRef.current!.signal);
       } finally {
         setIsRemoteLoading(false);
       }

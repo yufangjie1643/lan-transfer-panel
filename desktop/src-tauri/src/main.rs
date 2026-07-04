@@ -292,12 +292,22 @@ fn ssh_shell_command(profile: &ConnectionProfile, remote_command: &str) -> Resul
         return Err("缺少 SSH 主机或用户名".to_string());
     }
 
+    let control_dir = std::env::temp_dir().join("lan-transfer-ssh-control");
+    let _ = fs::create_dir_all(&control_dir);
+    let control_path = control_dir.join("%r@%h:%p");
+
     let mut command = Command::new("ssh");
     command
         .arg("-o")
         .arg("BatchMode=yes")
         .arg("-o")
         .arg("ConnectTimeout=8")
+        .arg("-o")
+        .arg("ControlMaster=auto")
+        .arg("-o")
+        .arg(format!("ControlPath={}", control_path.to_string_lossy()))
+        .arg("-o")
+        .arg("ControlPersist=60")
         .arg("-p")
         .arg(profile.port.to_string());
 
@@ -452,6 +462,10 @@ fn run_scp_download_to_target(
         return Err("缺少 SSH 主机、用户名或远程文件路径".to_string());
     }
 
+    let control_dir = std::env::temp_dir().join("lan-transfer-ssh-control");
+    let _ = fs::create_dir_all(&control_dir);
+    let control_path = control_dir.join("%r@%h:%p");
+
     let mut command = Command::new("scp");
     if recursive {
         command.arg("-r");
@@ -462,7 +476,13 @@ fn run_scp_download_to_target(
         .arg("-o")
         .arg("BatchMode=yes")
         .arg("-o")
-        .arg("ConnectTimeout=8");
+        .arg("ConnectTimeout=8")
+        .arg("-o")
+        .arg("ControlMaster=auto")
+        .arg("-o")
+        .arg(format!("ControlPath={}", control_path.to_string_lossy()))
+        .arg("-o")
+        .arg("ControlPersist=60");
 
     if let Some(identity) = profile.private_key_path.as_ref().filter(|value| !value.trim().is_empty()) {
         command.arg("-i").arg(identity);
