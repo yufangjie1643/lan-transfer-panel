@@ -12,6 +12,8 @@ export interface ExplorerFileListLabels {
   empty: string;
   loading: string;
   selectAll: string;
+  folder: string;
+  file: string;
 }
 
 export interface FileListItem {
@@ -72,9 +74,9 @@ export function FileList({
   }
 
   function formatType(item: FileListItem) {
-    if (item.isDir) return '文件夹';
+    if (item.isDir) return labels.folder;
     if (item.mimeType) return item.mimeType;
-    return '文件';
+    return labels.file;
   }
 
   if (isLoading) {

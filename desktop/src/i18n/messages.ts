@@ -138,6 +138,8 @@ interface Messages {
       empty: string;
       loading: string;
       selectAll: string;
+      folder: string;
+      file: string;
     };
     statusBar: {
       items: (count: number) => string;
@@ -292,7 +294,9 @@ export const messages: Record<Locale, Messages> = {
         size: '大小',
         empty: '此文件夹为空',
         loading: '加载中...',
-        selectAll: '全选'
+        selectAll: '全选',
+        folder: '文件夹',
+        file: '文件'
       },
       statusBar: {
         items: (count) => `${count} 个项目`,
@@ -443,7 +447,9 @@ export const messages: Record<Locale, Messages> = {
         size: 'Size',
         empty: 'This folder is empty',
         loading: 'Loading...',
-        selectAll: 'Select all'
+        selectAll: 'Select all',
+        folder: 'Folder',
+        file: 'File'
       },
       statusBar: {
         items: (count) => `${count} items`,
