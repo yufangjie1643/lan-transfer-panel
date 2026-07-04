@@ -13,6 +13,8 @@ use base64::Engine;
 #[cfg(windows)]
 mod windows_virtual_drag;
 
+mod sftp;
+
 #[derive(Serialize)]
 #[serde(rename_all = "camelCase")]
 struct LocalItem {
