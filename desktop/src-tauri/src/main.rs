@@ -457,7 +457,7 @@ fn validate_upload_relative_path(path: &str) -> Result<(), String> {
     if path.is_empty() {
         return Err("上传条目相对路径不能为空".to_string());
     }
-    if path.starts_with('/') {
+    if path.starts_with('/') || path.contains('\\') || path.contains(':') {
         return Err(format!("上传条目相对路径不能为绝对路径: {}", path));
     }
     for segment in path.split('/') {
