@@ -48,6 +48,8 @@ interface RemoteExplorerProps {
   onRangeSelect: (startKey: string, endKey: string) => void;
   onToggleSelectAll: () => void;
   onDoubleClickItem: (item: FileListItem) => void;
+  onPrepareNativeDrag?: (key: string) => void;
+  onNativeDragStart?: (key: string) => boolean;
 }
 
 export function RemoteExplorer({
@@ -76,7 +78,9 @@ export function RemoteExplorer({
   onSelect,
   onRangeSelect,
   onToggleSelectAll,
-  onDoubleClickItem
+  onDoubleClickItem,
+  onPrepareNativeDrag,
+  onNativeDragStart
 }: RemoteExplorerProps) {
   const [sortKey, setSortKey] = useState<FileListSortKey>('name');
   const [sortDirection, setSortDirection] = useState<FileListSortDirection>('asc');
@@ -148,6 +152,8 @@ export function RemoteExplorer({
           onRangeSelect={onRangeSelect}
           onDoubleClick={onDoubleClickItem}
           onToggleSelectAll={onToggleSelectAll}
+          onPrepareNativeDrag={onPrepareNativeDrag}
+          onNativeDragStart={onNativeDragStart}
         />
       </div>
       <StatusBar labels={labels.statusBar} itemCount={items.length} selectedCount={selectedKeys.size} error={error} isLoading={isLoading} />

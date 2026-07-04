@@ -37,6 +37,8 @@ interface FileListProps {
   onRangeSelect: (startKey: string, endKey: string) => void;
   onDoubleClick: (item: FileListItem) => void;
   onToggleSelectAll: () => void;
+  onPrepareNativeDrag?: (key: string) => void;
+  onNativeDragStart?: (key: string) => boolean;
 }
 
 export function FileList({
@@ -50,7 +52,9 @@ export function FileList({
   onSelect,
   onRangeSelect,
   onDoubleClick,
-  onToggleSelectAll
+  onToggleSelectAll,
+  onPrepareNativeDrag,
+  onNativeDragStart
 }: FileListProps) {
   const lastSelectedRef = useRef<string | null>(null);
 
@@ -113,8 +117,14 @@ export function FileList({
             key={item.key}
             className={selectedKeys.has(item.key) ? 'file-row selected' : 'file-row'}
             role="row"
+            draggable={!item.isDir}
             onClick={(event) => handleRowClick(item, event)}
             onDoubleClick={() => onDoubleClick(item)}
+            onMouseEnter={() => onPrepareNativeDrag?.(item.key)}
+            onDragStart={(event) => {
+              const ok = onNativeDragStart?.(item.key) ?? false;
+              if (!ok) event.preventDefault();
+            }}
           >
             <div role="gridcell" onClick={(event) => event.stopPropagation()}>
               <input

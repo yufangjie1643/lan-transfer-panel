@@ -119,4 +119,37 @@ describe('remote shell after SSH login', () => {
       expect.objectContaining({ title: '传输队列' })
     );
   });
+
+  it('starts a native drag for a remote file', async () => {
+    render(<App />);
+
+    await waitFor(() => expect(screen.getByText('yufanssh')).toBeInTheDocument());
+    fireEvent.click(screen.getByRole('button', { name: '连接' }));
+    const fileCell = await waitFor(() =>
+      screen.getByRole('gridcell', { name: 'logs_2.sqlite' })
+    );
+    const row = fileCell.closest('[role="row"]') as HTMLElement;
+
+    fireEvent.mouseEnter(row);
+    fireEvent.dragStart(row);
+
+    await waitFor(() => {
+      expect(invoke).toHaveBeenCalledWith('prepare_ssh_virtual_file', {
+        profile: expect.objectContaining({
+          host: '10.42.0.1',
+          port: 2687,
+          username: 'yufan',
+          authMethod: 'key'
+        }),
+        remotePath: '/home/yufan/logs_2.sqlite',
+        name: 'logs_2.sqlite'
+      });
+      expect(invoke).toHaveBeenCalledWith('start_virtual_file_drag', {
+        name: 'logs_2.sqlite',
+        remotePath: '/home/yufan/logs_2.sqlite',
+        localPath: 'D:\\Temp\\lan-transfer-virtual-drag\\logs_2.sqlite',
+        size: 2048
+      });
+    });
+  });
 });

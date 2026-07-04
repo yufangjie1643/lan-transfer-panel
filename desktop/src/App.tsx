@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { WebviewWindow } from '@tauri-apps/api/webviewWindow';
 import { PanelApiClient } from './api/client';
 import type { RemoteItem } from './api/types';
@@ -16,7 +16,9 @@ import type { FolderTreeNode } from './features/local/FolderTree';
 import { RemoteExplorer } from './features/remote/RemoteExplorer';
 import {
   listSshDirectory,
+  prepareSshVirtualFile,
   startSshDownloadTask,
+  startVirtualFileDrag,
   testSshConnection
 } from './features/remote/sshRemote';
 import { defaultLocale, messages, type Locale } from './i18n/messages';
@@ -27,6 +29,14 @@ interface AppProps {
 }
 
 type RemoteTreeChildren = Record<string, RemoteItem[]>;
+type PreparedNativeDrag = {
+  name: string;
+  remotePath: string;
+  size?: number;
+  promise: Promise<{ localPath: string }>;
+  localPath?: string;
+};
+const nativeDragMaxBytes = 128 * 1024 * 1024;
 
 function buildRemoteTreeNodes(
   remoteName: string,
@@ -99,8 +109,10 @@ export default function App({ initialBackendUrl = 'http://localhost:5590' }: App
   const [expandedRemotePaths, setExpandedRemotePaths] = useState<Set<string>>(new Set(['/']));
   const [sshRoot, setSshRoot] = useState('/home/yufan');
   const [sshProfile, setSshProfile] = useState<ConnectionProfile | null>(null);
+  const preparedNativeDrags = useRef(new Map<string, PreparedNativeDrag>());
   const [remoteHistory, setRemoteHistory] = useState<string[]>([]);
   const [remoteHistoryIndex, setRemoteHistoryIndex] = useState(-1);
+  const [isRemoteLoading, setIsRemoteLoading] = useState(false);
   const text = messages[locale];
   const appView = useAppStore((state) => state.appView);
   const editingProfileId = useAppStore((state) => state.editingProfileId);
@@ -163,23 +175,28 @@ export default function App({ initialBackendUrl = 'http://localhost:5590' }: App
         reportSshFilesPending();
         return;
       }
-      const listing = await loadSshDirectory(sshProfile, normalizeAbsolutePath(path));
-      const nextPath = listing.path;
-      if (mode === 'history') return;
-      setRemoteHistory((current) => {
-        if (mode === 'replace') {
-          const next = current.length ? [...current] : [nextPath];
-          const index = remoteHistoryIndex >= 0 ? remoteHistoryIndex : 0;
-          next[index] = nextPath;
-          setRemoteHistoryIndex(index);
+      setIsRemoteLoading(true);
+      try {
+        const listing = await loadSshDirectory(sshProfile, normalizeAbsolutePath(path));
+        const nextPath = listing.path;
+        if (mode === 'history') return;
+        setRemoteHistory((current) => {
+          if (mode === 'replace') {
+            const next = current.length ? [...current] : [nextPath];
+            const index = remoteHistoryIndex >= 0 ? remoteHistoryIndex : 0;
+            next[index] = nextPath;
+            setRemoteHistoryIndex(index);
+            return next;
+          }
+          if (current[remoteHistoryIndex] === nextPath) return current;
+          const prefix = remoteHistoryIndex >= 0 ? current.slice(0, remoteHistoryIndex + 1) : [];
+          const next = [...prefix, nextPath];
+          setRemoteHistoryIndex(next.length - 1);
           return next;
-        }
-        if (current[remoteHistoryIndex] === nextPath) return current;
-        const prefix = remoteHistoryIndex >= 0 ? current.slice(0, remoteHistoryIndex + 1) : [];
-        const next = [...prefix, nextPath];
-        setRemoteHistoryIndex(next.length - 1);
-        return next;
-      });
+        });
+      } finally {
+        setIsRemoteLoading(false);
+      }
     },
     [loadSshDirectory, remoteHistoryIndex, sshProfile]
   );
@@ -256,7 +273,12 @@ export default function App({ initialBackendUrl = 'http://localhost:5590' }: App
       setRemoteTreeChildren({});
       setExpandedRemotePaths(new Set(pathAncestors(root)));
       setSelectedRemoteKeys(new Set());
-      await loadSshDirectory(credentials, root);
+      setIsRemoteLoading(true);
+      try {
+        await loadSshDirectory(credentials, root);
+      } finally {
+        setIsRemoteLoading(false);
+      }
       setRemoteHistory([root]);
       setRemoteHistoryIndex(0);
       setAppView('remote');
@@ -313,6 +335,54 @@ export default function App({ initialBackendUrl = 'http://localhost:5590' }: App
       }
     },
     [remoteItems, setError, sshProfile, text.errors.downloadFailed]
+  );
+
+  const prepareNativeDrag = useCallback(
+    (key: string) => {
+      if (!sshProfile) return;
+      const item = remoteItems.find((candidate) => (candidate.Path || candidate.Name) === key);
+      if (
+        !item ||
+        item.IsDir ||
+        Number(item.Size || 0) > nativeDragMaxBytes ||
+        preparedNativeDrags.current.has(key)
+      ) return;
+      const remotePath = item.Path || item.Name;
+      const prepared: PreparedNativeDrag = {
+        name: item.Name,
+        remotePath,
+        size: item.Size,
+        promise: prepareSshVirtualFile(sshProfile, remotePath, item.Name).then((localPath) => {
+          prepared.localPath = localPath;
+          return { localPath };
+        })
+      };
+      preparedNativeDrags.current.set(key, prepared);
+    },
+    [remoteItems, sshProfile]
+  );
+
+  const handleNativeDragStart = useCallback(
+    (key: string) => {
+      if (!sshProfile) return false;
+      const item = remoteItems.find((candidate) => (candidate.Path || candidate.Name) === key);
+      if (!item || item.IsDir) return false;
+      if (Number(item.Size || 0) > nativeDragMaxBytes) return false;
+      const remotePath = item.Path || item.Name;
+      const prepared = preparedNativeDrags.current.get(key);
+      preparedNativeDrags.current.delete(key);
+      const launch = (localPath: string) =>
+        startVirtualFileDrag(item.Name, remotePath, localPath, item.Size);
+      const launchPromise = prepared?.localPath
+        ? launch(prepared.localPath)
+        : (prepared?.promise || prepareSshVirtualFile(sshProfile, remotePath, item.Name))
+          .then((result) => launch(typeof result === 'string' ? result : result.localPath));
+      launchPromise.catch((dragError) => {
+        setError(dragError instanceof Error ? dragError.message : '原生拖拽启动失败');
+      });
+      return true;
+    },
+    [remoteItems, setError, sshProfile]
   );
 
   function handleSwitchConnection() {
@@ -548,7 +618,7 @@ export default function App({ initialBackendUrl = 'http://localhost:5590' }: App
           canGoBack={canGoBack}
           canGoForward={canGoForward}
           canGoUp={Boolean(parentPath(remotePath))}
-          isLoading={false}
+          isLoading={isRemoteLoading}
           error={error}
           onTreeSelect={handleSshDirectoryOpen}
           onTreeToggle={(path) => {
@@ -581,6 +651,8 @@ export default function App({ initialBackendUrl = 'http://localhost:5590' }: App
             if (item.isDir) handleSshDirectoryOpen(item.key);
             else handleRemoteDownload(item.key);
           }}
+          onPrepareNativeDrag={prepareNativeDrag}
+          onNativeDragStart={handleNativeDragStart}
         />
       </section>
     </main>
