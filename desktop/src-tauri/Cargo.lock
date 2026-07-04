@@ -2498,6 +2498,7 @@ name = "lan-transfer-desktop"
 version = "0.1.0"
 dependencies = [
  "base64 0.22.1",
+ "chrono",
  "once_cell",
  "rfd",
  "russh",

@@ -8,12 +8,29 @@ use std::process::Command;
 use std::os::windows::process::CommandExt;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Mutex, OnceLock};
+use std::time::{Duration, UNIX_EPOCH};
 use base64::Engine;
+use chrono::{DateTime, Utc};
 
 #[cfg(windows)]
 mod windows_virtual_drag;
 
 mod sftp;
+
+fn sftp_profile(profile: &ConnectionProfile) -> sftp::ConnectionProfile {
+    sftp::ConnectionProfile {
+        id: profile.id.clone(),
+        label: profile.label.clone(),
+        host: profile.host.clone(),
+        port: profile.port,
+        username: profile.username.clone(),
+        auth_method: profile.auth_method.clone(),
+        password: profile.password.clone(),
+        private_key_path: profile.private_key_path.clone(),
+        passphrase: profile.passphrase.clone(),
+        save_credential: profile.save_credential,
+    }
+}
 
 #[derive(Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -122,31 +139,61 @@ fn delete_connection_profile(id: String) -> Result<Vec<ConnectionProfile>, Strin
 }
 
 #[tauri::command]
-fn test_ssh_connection(profile: ConnectionProfile) -> Result<String, String> {
-    let output = ssh_shell_command(&profile, "pwd")?;
-    Ok(output.trim().to_string())
+async fn test_ssh_connection(profile: ConnectionProfile) -> Result<String, String> {
+    let conn = sftp::connect(&sftp_profile(&profile)).await?;
+    let guard = conn.lock().await;
+    let cwd = guard
+        .sftp
+        .canonicalize(".")
+        .await
+        .map_err(|e| format!("获取远程目录失败: {}", e))?;
+    Ok(cwd)
 }
 
 #[tauri::command]
-fn list_ssh_directory(profile: ConnectionProfile, path: String) -> Result<SshDirectoryListing, String> {
+async fn list_ssh_directory(
+    profile: ConnectionProfile,
+    path: String,
+) -> Result<SshDirectoryListing, String> {
     let target = if path.trim().is_empty() {
         format!("/home/{}", profile.username)
     } else {
         path.trim().to_string()
     };
-    let script = "import json,os,sys,time\np=sys.argv[1]\nout=[]\nfor n in os.listdir(p):\n    full=os.path.join(p,n)\n    try:\n        st=os.stat(full)\n    except OSError:\n        continue\n    out.append({'Path':full,'Name':n,'Size':None if os.path.isdir(full) else st.st_size,'IsDir':os.path.isdir(full),'ModTime':time.strftime('%Y-%m-%dT%H:%M:%S', time.localtime(st.st_mtime))})\nout.sort(key=lambda x:(not x['IsDir'], x['Name'].lower()))\nprint(json.dumps({'path':p,'list':out}, ensure_ascii=False))";
-    let encoded = base64::engine::general_purpose::STANDARD.encode(script.as_bytes());
-    let command = format!(
-        "python3 -c {} {} {}",
-        shell_quote("import base64,sys;sys.argv=sys.argv[1:];exec(base64.b64decode(sys.argv[0]))"),
-        shell_quote(&encoded),
-        shell_quote(&target)
-    );
-    let output = ssh_shell_command(&profile, &command)?;
-    let listing: SshDirectoryListing = serde_json::from_str(&output).map_err(|err| {
-        format!("服务器返回的文件列表不是合法 JSON: {}", err)
-    })?;
-    Ok(listing)
+
+    let conn = sftp::connect(&sftp_profile(&profile)).await?;
+    let guard = conn.lock().await;
+    let entries = guard
+        .sftp
+        .read_dir(&target)
+        .await
+        .map_err(|e| format!("读取目录失败: {}", e))?;
+
+    let mut list = Vec::new();
+    for entry in entries {
+        let meta = entry.metadata();
+        let name = entry.file_name();
+        let full_path = entry.path();
+        let mod_time = meta.mtime.map(|t| {
+            let system_time = UNIX_EPOCH + Duration::from_secs(t as u64);
+            DateTime::<Utc>::from(system_time).to_rfc3339()
+        });
+        list.push(RemoteItem {
+            path: full_path,
+            name,
+            size: if meta.is_dir() { None } else { Some(meta.len()) },
+            is_dir: meta.is_dir(),
+            mod_time,
+        });
+    }
+
+    list.sort_by(|a, b| {
+        b.is_dir
+            .cmp(&a.is_dir)
+            .then_with(|| a.name.to_lowercase().cmp(&b.name.to_lowercase()))
+    });
+
+    Ok(SshDirectoryListing { path: target, list })
 }
 
 #[tauri::command]
