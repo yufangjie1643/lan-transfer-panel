@@ -23,7 +23,8 @@ describe('App launcher flow', () => {
   it('connects to the selected SSH profile from the launcher', async () => {
     render(<App />);
     await waitFor(() => expect(screen.getByText('yufanssh')).toBeInTheDocument());
-    fireEvent.click(screen.getByRole('button', { name: '连接' }));
+    const yufansshCard = screen.getByText('yufanssh').closest('.server-card')!;
+    fireEvent.click(yufansshCard.querySelector('button')!);
     await waitFor(() => expect(screen.getByText('已连接：yufan@10.42.0.1:2687')).toBeInTheDocument());
     expect(screen.getByText('logs_2.sqlite')).toBeInTheDocument();
   });
