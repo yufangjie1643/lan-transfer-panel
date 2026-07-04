@@ -453,12 +453,31 @@ async fn sftp_ensure_dir(connection: &sftp::SftpConnection, remote_path: &str) -
         .map_err(|e| format!("创建远程目录失败: {} (原始错误: {})", e, meta_err))
 }
 
+fn validate_upload_relative_path(path: &str) -> Result<(), String> {
+    if path.is_empty() {
+        return Err("上传条目相对路径不能为空".to_string());
+    }
+    if path.starts_with('/') {
+        return Err(format!("上传条目相对路径不能为绝对路径: {}", path));
+    }
+    for segment in path.split('/') {
+        if segment == ".." {
+            return Err(format!("上传条目相对路径包含非法段: {}", path));
+        }
+    }
+    Ok(())
+}
+
 #[tauri::command]
 async fn upload_ssh_entries(
     profile: ConnectionProfile,
     remote_dir: String,
     entries: Vec<UploadEntry>,
 ) -> Result<Vec<String>, String> {
+    for entry in &entries {
+        validate_upload_relative_path(&entry.relative_path)?;
+    }
+
     let conn = sftp::connect(&profile).await?;
     let guard = conn.lock().await;
     let mut uploaded = Vec::new();

@@ -52,9 +52,6 @@ vi.mock('@tauri-apps/api/core', () => ({
     if (command === 'select_upload_files') {
       return Promise.resolve(null);
     }
-    if (command === 'upload_ssh_file') {
-      return Promise.resolve();
-    }
     if (command === 'upload_ssh_entries') {
       return Promise.resolve([]);
     }
