@@ -13,3 +13,4 @@ desktop/src-tauri/target/
 desktop/.dev-logs/
 .DS_Store
 .worktrees/
+.superpowers/
