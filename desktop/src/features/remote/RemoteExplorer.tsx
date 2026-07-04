@@ -1,151 +1,156 @@
+import { useMemo, useState, type MouseEvent, type ChangeEvent } from 'react';
 import { FolderTree, type FolderTreeNode } from '../local/FolderTree';
-import { FilePane, type PaneItem } from '../panes/FilePane';
-import { ArrowLeft, ArrowRight, ArrowUp, RefreshCcw } from 'lucide-react';
+import { Toolbar, type ExplorerToolbarLabels } from './Toolbar';
+import { AddressBar, type ExplorerAddressBarLabels } from './AddressBar';
+import {
+  FileList,
+  type ExplorerFileListLabels,
+  type FileListItem,
+  type FileListSortKey,
+  type FileListSortDirection
+} from './FileList';
+import { StatusBar, type ExplorerStatusBarLabels } from './StatusBar';
 
 interface RemoteExplorerLabels {
-  title: string;
   tree: string;
-  details: string;
-  refresh: string;
-  path: string;
-  openPath: string;
-  back?: string;
-  forward?: string;
-  parent?: string;
   expandFolder: (name: string) => string;
   collapseFolder: (name: string) => string;
+  toolbar: ExplorerToolbarLabels;
+  addressBar: ExplorerAddressBarLabels;
+  fileList: ExplorerFileListLabels;
+  statusBar: ExplorerStatusBarLabels;
 }
 
 interface RemoteExplorerProps {
   labels: RemoteExplorerLabels;
+  remoteName: string;
   treeNodes: FolderTreeNode[];
   currentPath: string;
-  items: PaneItem[];
+  items: FileListItem[];
   selectedKeys: Set<string>;
-  pathValue: string;
-  onPathValueChange: (path: string) => void;
-  onPathSubmit: () => void;
-  canGoBack?: boolean;
-  canGoForward?: boolean;
-  canGoParent?: boolean;
-  onGoBack?: () => void;
-  onGoForward?: () => void;
-  onGoParent?: () => void;
+  canGoBack: boolean;
+  canGoForward: boolean;
+  canGoUp: boolean;
+  isLoading?: boolean;
+  error?: string | null;
   onTreeSelect: (path: string) => void;
   onTreeToggle: (path: string) => void;
-  onSelectItem: (key: string, additive: boolean) => void;
-  onOpenDirectory: (key: string) => void;
+  onNavigate: (path: string) => void;
+  onGoBack: () => void;
+  onGoForward: () => void;
+  onGoUp: () => void;
   onRefresh: () => void;
-  downloadLabel?: string;
-  onDownloadFile?: (key: string) => void;
-  onDragDownloadFile?: (key: string) => void;
-  onPrepareNativeDrag?: (key: string) => void;
-  onNativeDragStart?: (key: string) => boolean;
+  onNewFolder: () => void;
+  onDownloadSelected: () => void;
+  onDeleteSelected: () => void;
+  onOpenQueue: () => void;
+  onSelect: (key: string, additive: boolean) => void;
+  onRangeSelect: (startKey: string, endKey: string) => void;
+  onToggleSelectAll: () => void;
+  onDoubleClickItem: (item: FileListItem) => void;
 }
 
 export function RemoteExplorer({
   labels,
+  remoteName,
   treeNodes,
   currentPath,
   items,
   selectedKeys,
-  pathValue,
-  onPathValueChange,
-  onPathSubmit,
-  canGoBack = false,
-  canGoForward = false,
-  canGoParent = false,
-  onGoBack,
-  onGoForward,
-  onGoParent,
+  canGoBack,
+  canGoForward,
+  canGoUp,
+  isLoading,
+  error,
   onTreeSelect,
   onTreeToggle,
-  onSelectItem,
-  onOpenDirectory,
+  onNavigate,
+  onGoBack,
+  onGoForward,
+  onGoUp,
   onRefresh,
-  downloadLabel,
-  onDownloadFile,
-  onDragDownloadFile,
-  onPrepareNativeDrag,
-  onNativeDragStart
+  onNewFolder,
+  onDownloadSelected,
+  onDeleteSelected,
+  onOpenQueue,
+  onSelect,
+  onRangeSelect,
+  onToggleSelectAll,
+  onDoubleClickItem
 }: RemoteExplorerProps) {
+  const [sortKey, setSortKey] = useState<FileListSortKey>('name');
+  const [sortDirection, setSortDirection] = useState<FileListSortDirection>('asc');
+
+  const sortedItems = useMemo(() => {
+    const sorted = [...items];
+    sorted.sort((a, b) => {
+      if (a.isDir !== b.isDir) return a.isDir ? -1 : 1;
+      let comparison = 0;
+      if (sortKey === 'name') comparison = a.name.localeCompare(b.name);
+      else if (sortKey === 'modified') comparison = (a.modified ?? '').localeCompare(b.modified ?? '');
+      else if (sortKey === 'size') comparison = (a.size ?? 0) - (b.size ?? 0);
+      return sortDirection === 'asc' ? comparison : -comparison;
+    });
+    return sorted;
+  }, [items, sortKey, sortDirection]);
+
+  function handleSort(key: FileListSortKey) {
+    if (sortKey === key) {
+      setSortDirection((current) => (current === 'asc' ? 'desc' : 'asc'));
+    } else {
+      setSortKey(key);
+      setSortDirection('asc');
+    }
+  }
+
+  function handleSelect(key: string, event: MouseEvent | ChangeEvent) {
+    const additive = 'ctrlKey' in event ? event.ctrlKey || event.metaKey : true;
+    onSelect(key, additive);
+  }
+
   return (
-    <section className="remote-explorer" aria-label={labels.title}>
-      <FolderTree
-        ariaLabel={labels.tree}
-        nodes={treeNodes}
-        onSelect={onTreeSelect}
-        onToggle={onTreeToggle}
-        expandLabel={labels.expandFolder}
-        collapseLabel={labels.collapseFolder}
+    <section className="remote-explorer" aria-label={labels.fileList.name}>
+      <Toolbar
+        labels={labels.toolbar}
+        canGoBack={canGoBack}
+        canGoForward={canGoForward}
+        canGoUp={canGoUp}
+        hasSelection={selectedKeys.size > 0}
+        isLoading={isLoading}
+        onBack={onGoBack}
+        onForward={onGoForward}
+        onUp={onGoUp}
+        onRefresh={onRefresh}
+        onNewFolder={onNewFolder}
+        onDownload={onDownloadSelected}
+        onDelete={onDeleteSelected}
+        onOpenQueue={onOpenQueue}
       />
-      <div className="remote-detail">
-        <form
-          className="remote-path-bar"
-          onSubmit={(event) => {
-            event.preventDefault();
-            onPathSubmit();
-          }}
-        >
-          <div className="remote-nav-buttons" aria-label="目录导航">
-            <button
-              type="button"
-              aria-label={labels.back ?? '后退'}
-              title={labels.back ?? '后退'}
-              disabled={!canGoBack}
-              onClick={onGoBack}
-            >
-              <ArrowLeft size={16} />
-            </button>
-            <button
-              type="button"
-              aria-label={labels.forward ?? '前进'}
-              title={labels.forward ?? '前进'}
-              disabled={!canGoForward}
-              onClick={onGoForward}
-            >
-              <ArrowRight size={16} />
-            </button>
-            <button
-              type="button"
-              aria-label={labels.parent ?? '上一级'}
-              title={labels.parent ?? '上一级'}
-              disabled={!canGoParent}
-              onClick={onGoParent}
-            >
-              <ArrowUp size={16} />
-            </button>
-            <button type="button" aria-label={labels.refresh} title={labels.refresh} onClick={onRefresh}>
-              <RefreshCcw size={16} />
-            </button>
-          </div>
-          <label>
-            <span>{labels.path}</span>
-            <input
-              aria-label={labels.path}
-              value={pathValue}
-              onChange={(event) => onPathValueChange(event.currentTarget.value)}
-            />
-          </label>
-          <button type="submit">{labels.openPath}</button>
-        </form>
-        <FilePane
-          title={labels.title}
-          ariaLabel={labels.details}
-          refreshLabel={labels.refresh}
-          path={currentPath}
-          items={items}
+      <AddressBar labels={labels.addressBar} remoteName={remoteName} path={currentPath} onNavigate={onNavigate} />
+      <div className="explorer-main">
+        <FolderTree
+          ariaLabel={labels.tree}
+          nodes={treeNodes}
+          onSelect={onTreeSelect}
+          onToggle={onTreeToggle}
+          expandLabel={labels.expandFolder}
+          collapseLabel={labels.collapseFolder}
+        />
+        <FileList
+          labels={labels.fileList}
+          items={sortedItems}
           selectedKeys={selectedKeys}
-          onSelect={onSelectItem}
-          onOpenDirectory={onOpenDirectory}
-          onRefresh={onRefresh}
-          downloadLabel={downloadLabel}
-          onDownload={onDownloadFile}
-          onDragDownload={onDragDownloadFile}
-          onPrepareNativeDrag={onPrepareNativeDrag}
-          onNativeDragStart={onNativeDragStart}
+          sortKey={sortKey}
+          sortDirection={sortDirection}
+          isLoading={isLoading}
+          onSort={handleSort}
+          onSelect={handleSelect}
+          onRangeSelect={onRangeSelect}
+          onDoubleClick={onDoubleClickItem}
+          onToggleSelectAll={onToggleSelectAll}
         />
       </div>
+      <StatusBar labels={labels.statusBar} itemCount={items.length} selectedCount={selectedKeys.size} error={error} isLoading={isLoading} />
     </section>
   );
 }
