@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { invoke } from '@tauri-apps/api/core';
 import { WebviewWindow } from '@tauri-apps/api/webviewWindow';
 import { PanelApiClient } from './api/client';
 import type { RemoteItem } from './api/types';
@@ -136,6 +137,17 @@ export default function App({ initialBackendUrl = 'http://localhost:5590' }: App
   useEffect(() => {
     setBackendUrl(initialBackendUrl);
   }, [initialBackendUrl, setBackendUrl]);
+
+  useEffect(() => {
+    function handleKeyDown(event: KeyboardEvent) {
+      if (event.key === 'F12') {
+        event.preventDefault();
+        invoke('open_devtools').catch(() => undefined);
+      }
+    }
+    window.addEventListener('keydown', handleKeyDown);
+    return () => window.removeEventListener('keydown', handleKeyDown);
+  }, []);
 
   useEffect(() => {
     let canceled = false;
