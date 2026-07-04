@@ -116,6 +116,34 @@ interface Messages {
     resume: (gid: string) => string;
     remove: (gid: string) => string;
   };
+  explorer: {
+    toolbar: {
+      back: string;
+      forward: string;
+      up: string;
+      refresh: string;
+      newFolder: string;
+      download: string;
+      delete: string;
+      queue: string;
+    };
+    addressBar: {
+      editPath: string;
+    };
+    fileList: {
+      name: string;
+      modified: string;
+      type: string;
+      size: string;
+      empty: string;
+      loading: string;
+      selectAll: string;
+    };
+    statusBar: {
+      items: (count: number) => string;
+      selected: (count: number) => string;
+    };
+  };
   errors: {
     openDirectoryFailed: string;
     refreshFailed: string;
@@ -243,6 +271,34 @@ export const messages: Record<Locale, Messages> = {
       resume: (gid) => `继续 ${gid}`,
       remove: (gid) => `移除 ${gid}`
     },
+    explorer: {
+      toolbar: {
+        back: '后退',
+        forward: '前进',
+        up: '上一级',
+        refresh: '刷新',
+        newFolder: '新建文件夹',
+        download: '下载',
+        delete: '删除',
+        queue: '队列'
+      },
+      addressBar: {
+        editPath: '编辑路径'
+      },
+      fileList: {
+        name: '名称',
+        modified: '修改时间',
+        type: '类型',
+        size: '大小',
+        empty: '此文件夹为空',
+        loading: '加载中...',
+        selectAll: '全选'
+      },
+      statusBar: {
+        items: (count) => `${count} 个项目`,
+        selected: (count) => `已选择 ${count} 个项目`
+      }
+    },
     errors: {
       openDirectoryFailed: '打开目录失败',
       refreshFailed: '刷新失败',
@@ -365,6 +421,34 @@ export const messages: Record<Locale, Messages> = {
       pause: (gid) => `Pause ${gid}`,
       resume: (gid) => `Resume ${gid}`,
       remove: (gid) => `Remove ${gid}`
+    },
+    explorer: {
+      toolbar: {
+        back: 'Back',
+        forward: 'Forward',
+        up: 'Up one level',
+        refresh: 'Refresh',
+        newFolder: 'New folder',
+        download: 'Download',
+        delete: 'Delete',
+        queue: 'Queue'
+      },
+      addressBar: {
+        editPath: 'Edit path'
+      },
+      fileList: {
+        name: 'Name',
+        modified: 'Modified',
+        type: 'Type',
+        size: 'Size',
+        empty: 'This folder is empty',
+        loading: 'Loading...',
+        selectAll: 'Select all'
+      },
+      statusBar: {
+        items: (count) => `${count} items`,
+        selected: (count) => `${count} selected`
+      }
     },
     errors: {
       openDirectoryFailed: 'Open directory failed',

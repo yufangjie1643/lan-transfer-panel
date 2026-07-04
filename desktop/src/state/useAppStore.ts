@@ -39,7 +39,7 @@ export const useAppStore = create<AppState>((set) => ({
   setSessionUsername: (sessionUsername) => set({ sessionUsername }),
   setRemotes: (remotes) => set({ remotes }),
   setRemoteItems: (remote, remotePath, remoteItems) =>
-    set({ remote, remotePath, remoteItems, selectedRemoteKeys: new Set() }),
+    set({ remote, remotePath, remoteItems }),
   setSelectedRemoteKeys: (selectedRemoteKeys) => set({ selectedRemoteKeys }),
   setError: (error) => set({ error }),
   setAppView: (appView) => set({ appView }),
