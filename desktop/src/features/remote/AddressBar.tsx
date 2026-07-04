@@ -1,3 +1,4 @@
+import { Pencil } from 'lucide-react';
 import { useEffect, useRef, useState } from 'react';
 
 export interface ExplorerAddressBarLabels {
@@ -61,9 +62,9 @@ export function AddressBar({ labels, remoteName, path, onNavigate }: AddressBarP
   }
 
   return (
-    <div className="explorer-address-bar" onClick={() => setIsEditing(true)} role="button" tabIndex={0}>
+    <div className="explorer-address-bar">
       {segments.map((segment, index) => (
-        <span key={`${segment}-${index}`} className="address-segment">
+        <span key={segmentPaths[index]} className="address-segment">
           {index > 0 ? <span className="address-separator">›</span> : null}
           <button
             type="button"
@@ -76,6 +77,15 @@ export function AddressBar({ labels, remoteName, path, onNavigate }: AddressBarP
           </button>
         </span>
       ))}
+      <button
+        type="button"
+        className="address-edit-button"
+        data-testid="address-bar-edit"
+        aria-label={labels.editPath}
+        onClick={() => setIsEditing(true)}
+      >
+        <Pencil size={14} />
+      </button>
     </div>
   );
 }

@@ -23,7 +23,7 @@ describe('AddressBar', () => {
   it('switches to edit mode and submits a new path', () => {
     const onNavigate = vi.fn();
     render(<AddressBar labels={labels} remoteName="server" path="/home/yufan" onNavigate={onNavigate} />);
-    fireEvent.click(screen.getByRole('button', { name: 'server › home › yufan' }));
+    fireEvent.click(screen.getByRole('button', { name: labels.editPath }));
     fireEvent.change(screen.getByRole('textbox'), { target: { value: '/tmp' } });
     fireEvent.keyDown(screen.getByRole('textbox'), { key: 'Enter' });
     expect(onNavigate).toHaveBeenCalledWith('/tmp');
