@@ -173,6 +173,9 @@ async fn list_ssh_directory(
     for entry in entries {
         let meta = entry.metadata();
         let name = entry.file_name();
+        if name == "." || name == ".." {
+            continue;
+        }
         let full_path = entry.path();
         let mod_time = meta.mtime.map(|t| {
             let system_time = UNIX_EPOCH + Duration::from_secs(t as u64);
