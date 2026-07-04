@@ -118,7 +118,7 @@ fn trimmed_profile_parts(profile: &ConnectionProfile) -> (String, String) {
 
 pub fn connection_key(profile: &ConnectionProfile) -> String {
     let (username, host) = trimmed_profile_parts(profile);
-    format!("{}@{}:{}", username, host, profile.port)
+    format!("{}#{}@{}:{}", profile.id, username, host, profile.port)
 }
 
 pub async fn connect(profile: &ConnectionProfile) -> Result<Arc<tokio::sync::Mutex<SftpConnection>>, String> {

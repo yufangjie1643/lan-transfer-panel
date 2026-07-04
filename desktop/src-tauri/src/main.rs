@@ -461,7 +461,7 @@ fn validate_upload_relative_path(path: &str) -> Result<(), String> {
         return Err(format!("上传条目相对路径不能为绝对路径: {}", path));
     }
     for segment in path.split('/') {
-        if segment == ".." {
+        if segment.is_empty() || segment == "." || segment == ".." {
             return Err(format!("上传条目相对路径包含非法段: {}", path));
         }
     }
@@ -718,7 +718,9 @@ async fn prepare_ssh_virtual_file(
     let staging_dir = std::env::temp_dir()
         .join("lan-transfer-virtual-drag")
         .join(format!("{}", std::process::id()));
-    fs::create_dir_all(&staging_dir).map_err(|err| err.to_string())?;
+    tokio::fs::create_dir_all(&staging_dir)
+        .await
+        .map_err(|err| format!("创建虚拟拖拽临时目录失败: {}", err))?;
     let local_path = staging_dir.join(safe_local_file_name(&name));
     sftp_copy_to_local(&profile, &remote_path, &local_path).await?;
     Ok(local_path.to_string_lossy().to_string())
