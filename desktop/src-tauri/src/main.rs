@@ -4,6 +4,8 @@ use serde::{Deserialize, Serialize};
 use std::fs;
 use std::path::{Path, PathBuf};
 use std::process::Command;
+#[cfg(windows)]
+use std::os::windows::process::CommandExt;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Mutex, OnceLock};
 use base64::Engine;
@@ -306,6 +308,9 @@ fn ssh_shell_command(profile: &ConnectionProfile, remote_command: &str) -> Resul
     command.arg(format!("{}@{}", username, host));
     command.arg(remote_command);
 
+    #[cfg(windows)]
+    command.creation_flags(0x08000000);
+
     let output = command.output().map_err(|err| format!("启动 ssh 失败: {}", err))?;
     if !output.status.success() {
         let detail = String::from_utf8_lossy(&output.stderr).trim().to_string();
@@ -466,6 +471,9 @@ fn run_scp_download_to_target(
     command
         .arg(format!("{}@{}:{}", username, host, remote_path))
         .arg(&local_target);
+
+    #[cfg(windows)]
+    command.creation_flags(0x08000000);
 
     let output = command.output().map_err(|err| format!("启动 scp 失败: {}", err))?;
     if !output.status.success() {
