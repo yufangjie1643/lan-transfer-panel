@@ -72,15 +72,6 @@ export function selectUploadFiles() {
   return invoke<string[] | null>('select_upload_files');
 }
 
-export function uploadSshFile(
-  profile: ConnectionProfile,
-  remoteDir: string,
-  localPath: string,
-  name: string
-) {
-  return invoke<void>('upload_ssh_file', { profile, remoteDir, localPath, name });
-}
-
 export function uploadSshEntries(
   profile: ConnectionProfile,
   remoteDir: string,

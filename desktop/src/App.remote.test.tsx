@@ -60,7 +60,7 @@ describe('remote shell after SSH login', () => {
 
     await waitFor(() => {
       expect(invoke).toHaveBeenCalledWith('select_download_directory');
-      expect(invoke).toHaveBeenCalledWith('start_ssh_download_task', {
+      expect(invoke).toHaveBeenCalledWith('download_ssh_file', {
         profile: expect.objectContaining({
           host: '10.42.0.1',
           port: 2687,
@@ -68,11 +68,14 @@ describe('remote shell after SSH login', () => {
           authMethod: 'key'
         }),
         remotePath: '/home/yufan/logs_2.sqlite',
-        localDir: 'D:\\download',
-        recursive: false,
-        name: 'logs_2.sqlite',
-        size: 2048
+        localDir: 'D:\\download'
       });
+      expect(invoke).not.toHaveBeenCalledWith(
+        'start_ssh_download_task',
+        expect.objectContaining({
+          remotePath: '/home/yufan/logs_2.sqlite'
+        })
+      );
     });
   });
 

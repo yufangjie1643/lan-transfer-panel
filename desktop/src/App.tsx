@@ -19,6 +19,7 @@ import { ExplorerSettingsPanel } from './features/remote/ExplorerSettingsPanel';
 import { loadExplorerSettings, saveExplorerSettings, type ExplorerSettings } from './features/remote/explorerSettings';
 import { RemoteExplorer } from './features/remote/RemoteExplorer';
 import {
+  downloadSshFile,
   listSshDirectory,
   prepareSshVirtualFile,
   selectUploadFiles,
@@ -437,14 +438,18 @@ export default function App({ initialBackendUrl = 'http://localhost:5590' }: App
         setError(null);
         const directory = await selectDownloadDirectory();
         if (!directory) return;
-        await startSshDownloadTask(
-          sshProfile,
-          item.Path || item.Name,
-          directory,
-          item.IsDir,
-          item.Name,
-          item.Size
-        );
+        if (item.IsDir) {
+          await startSshDownloadTask(
+            sshProfile,
+            item.Path || item.Name,
+            directory,
+            true,
+            item.Name,
+            item.Size
+          );
+        } else {
+          await downloadSshFile(sshProfile, item.Path || item.Name, directory);
+        }
       } catch (downloadError) {
         setError(downloadError instanceof Error ? downloadError.message : text.errors.downloadFailed);
       }
@@ -634,14 +639,18 @@ export default function App({ initialBackendUrl = 'http://localhost:5590' }: App
         selectedRemoteKeys.has(item.Path || item.Name)
       );
       for (const item of selectedItems) {
-        await startSshDownloadTask(
-          sshProfile,
-          item.Path || item.Name,
-          directory,
-          item.IsDir,
-          item.Name,
-          item.Size
-        );
+        if (item.IsDir) {
+          await startSshDownloadTask(
+            sshProfile,
+            item.Path || item.Name,
+            directory,
+            true,
+            item.Name,
+            item.Size
+          );
+        } else {
+          await downloadSshFile(sshProfile, item.Path || item.Name, directory);
+        }
       }
     } catch (downloadError) {
       setError(downloadError instanceof Error ? downloadError.message : text.errors.downloadFailed);

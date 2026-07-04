@@ -1,9 +1,9 @@
 use std::collections::HashMap;
-use std::path::Path;
+use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use once_cell::sync::Lazy;
 use russh::client::{self, Handle};
-use russh::keys::{load_secret_key, PrivateKeyWithHashAlg};
+use russh::keys::{check_known_hosts_path, load_secret_key, PrivateKeyWithHashAlg};
 use russh::ChannelId;
 use russh_sftp::client::SftpSession;
 use serde::{Deserialize, Serialize};
@@ -24,20 +24,70 @@ pub struct ConnectionProfile {
 }
 
 pub struct SftpConnection {
+    /// 保持底层 SSH 会话存活；SFTP 子系统依赖此连接。
+    #[allow(dead_code)]
     pub handle: Handle<ClientHandler>,
     pub sftp: SftpSession,
 }
 
-pub struct ClientHandler;
+#[derive(Debug)]
+pub enum ClientHandlerError {
+    Russh(russh::Error),
+    Verification(String),
+}
+
+impl From<russh::Error> for ClientHandlerError {
+    fn from(error: russh::Error) -> Self {
+        ClientHandlerError::Russh(error)
+    }
+}
+
+impl std::fmt::Display for ClientHandlerError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            ClientHandlerError::Russh(e) => write!(f, "{}", e),
+            ClientHandlerError::Verification(msg) => write!(f, "{}", msg),
+        }
+    }
+}
+
+impl std::error::Error for ClientHandlerError {}
+
+pub struct ClientHandler {
+    host: String,
+    port: u16,
+}
 
 impl client::Handler for ClientHandler {
-    type Error = russh::Error;
+    type Error = ClientHandlerError;
 
     async fn check_server_key(
         &mut self,
-        _server_public_key: &russh::keys::PublicKey,
+        server_public_key: &russh::keys::PublicKey,
     ) -> Result<bool, Self::Error> {
-        Ok(true)
+        let known_hosts = known_hosts_path().map_err(|e| {
+            ClientHandlerError::Verification(format!(
+                "SSH 主机密钥验证失败: 无法定位 known_hosts 文件 ({e})"
+            ))
+        })?;
+        match check_known_hosts_path(
+            &self.host,
+            self.port,
+            server_public_key,
+            &known_hosts,
+        ) {
+            Ok(true) => Ok(true),
+            Ok(false) => Err(ClientHandlerError::Verification(format!(
+                "SSH 主机密钥验证失败: {}:{} 的主机密钥未在 {} 中记录",
+                self.host,
+                self.port,
+                known_hosts.display()
+            ))),
+            Err(e) => Err(ClientHandlerError::Verification(format!(
+                "SSH 主机密钥验证失败: {} ({}:{})",
+                e, self.host, self.port
+            ))),
+        }
     }
 
     async fn data(
@@ -48,6 +98,15 @@ impl client::Handler for ClientHandler {
     ) -> Result<(), Self::Error> {
         Ok(())
     }
+}
+
+fn known_hosts_path() -> Result<PathBuf, ClientHandlerError> {
+    let home = std::env::var_os("USERPROFILE")
+        .or_else(|| std::env::var_os("HOME"))
+        .ok_or_else(|| {
+            ClientHandlerError::Verification("无法定位用户主目录".to_string())
+        })?;
+    Ok(PathBuf::from(home).join(".ssh").join("known_hosts"))
 }
 
 static POOL: Lazy<tokio::sync::Mutex<HashMap<String, Arc<tokio::sync::Mutex<SftpConnection>>>>> =
@@ -66,7 +125,12 @@ pub async fn connect(profile: &ConnectionProfile) -> Result<Arc<tokio::sync::Mut
     let key = connection_key(profile);
     let mut pool = POOL.lock().await;
     if let Some(entry) = pool.get(&key) {
-        return Ok(entry.clone());
+        let guard = entry.lock().await;
+        if guard.sftp.canonicalize(".").await.is_ok() {
+            return Ok(entry.clone());
+        }
+        drop(guard);
+        pool.remove(&key);
     }
 
     let connection = do_connect(profile).await?;
@@ -85,7 +149,10 @@ async fn do_connect(profile: &ConnectionProfile) -> Result<SftpConnection, Strin
     }
 
     let config = Arc::new(client::Config::default());
-    let handler = ClientHandler;
+    let handler = ClientHandler {
+        host: host.clone(),
+        port: profile.port,
+    };
     let mut handle = client::connect(config, (host, profile.port), handler)
         .await
         .map_err(|e| format!("连接 SSH 失败: {}", e))?;

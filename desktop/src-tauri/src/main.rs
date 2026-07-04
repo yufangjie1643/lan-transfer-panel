@@ -9,7 +9,6 @@ use std::os::windows::process::CommandExt;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Mutex, OnceLock};
 use std::time::{Duration, UNIX_EPOCH};
-use base64::Engine;
 use chrono::{DateTime, Utc};
 
 #[cfg(windows)]
@@ -17,20 +16,7 @@ mod windows_virtual_drag;
 
 mod sftp;
 
-fn sftp_profile(profile: &ConnectionProfile) -> sftp::ConnectionProfile {
-    sftp::ConnectionProfile {
-        id: profile.id.clone(),
-        label: profile.label.clone(),
-        host: profile.host.clone(),
-        port: profile.port,
-        username: profile.username.clone(),
-        auth_method: profile.auth_method.clone(),
-        password: profile.password.clone(),
-        private_key_path: profile.private_key_path.clone(),
-        passphrase: profile.passphrase.clone(),
-        save_credential: profile.save_credential,
-    }
-}
+use sftp::ConnectionProfile;
 
 #[derive(Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -47,21 +33,6 @@ struct LocalItem {
 struct LocalRoot {
     path: String,
     name: String,
-}
-
-#[derive(Deserialize, Serialize)]
-#[serde(rename_all = "camelCase")]
-struct ConnectionProfile {
-    id: String,
-    label: String,
-    host: String,
-    port: u16,
-    username: String,
-    auth_method: String,
-    password: Option<String>,
-    private_key_path: Option<String>,
-    passphrase: Option<String>,
-    save_credential: bool,
 }
 
 #[derive(Deserialize, Serialize)]
@@ -140,7 +111,7 @@ fn delete_connection_profile(id: String) -> Result<Vec<ConnectionProfile>, Strin
 
 #[tauri::command]
 async fn test_ssh_connection(profile: ConnectionProfile) -> Result<String, String> {
-    let conn = sftp::connect(&sftp_profile(&profile)).await?;
+    let conn = sftp::connect(&profile).await?;
     let guard = conn.lock().await;
     let cwd = guard
         .sftp
@@ -161,7 +132,7 @@ async fn list_ssh_directory(
         path.trim().to_string()
     };
 
-    let conn = sftp::connect(&sftp_profile(&profile)).await?;
+    let conn = sftp::connect(&profile).await?;
     let guard = conn.lock().await;
     let entries = guard
         .sftp
@@ -334,61 +305,6 @@ fn default_connection_profiles() -> Vec<ConnectionProfile> {
     ]
 }
 
-fn ssh_shell_command(profile: &ConnectionProfile, remote_command: &str) -> Result<String, String> {
-    if profile.auth_method != "key" {
-        return Err("当前桌面端 SSH 连接先支持密钥认证；密码认证需要接入 SSH 库后启用。".to_string());
-    }
-    let host = profile.host.trim();
-    let username = profile.username.trim();
-    if host.is_empty() || username.is_empty() {
-        return Err("缺少 SSH 主机或用户名".to_string());
-    }
-
-    let control_dir = std::env::temp_dir().join("lan-transfer-ssh-control");
-    let _ = fs::create_dir_all(&control_dir);
-    let control_path = control_dir.join("%r@%h:%p");
-
-    let mut command = Command::new("ssh");
-    command
-        .arg("-o")
-        .arg("BatchMode=yes")
-        .arg("-o")
-        .arg("ConnectTimeout=8")
-        .arg("-o")
-        .arg("ControlMaster=auto")
-        .arg("-o")
-        .arg(format!("ControlPath={}", control_path.to_string_lossy()))
-        .arg("-o")
-        .arg("ControlPersist=60")
-        .arg("-p")
-        .arg(profile.port.to_string());
-
-    if let Some(identity) = profile.private_key_path.as_ref().filter(|value| !value.trim().is_empty()) {
-        command.arg("-i").arg(identity);
-    }
-
-    command.arg(format!("{}@{}", username, host));
-    command.arg(remote_command);
-
-    #[cfg(windows)]
-    command.creation_flags(0x08000000);
-
-    let output = command.output().map_err(|err| format!("启动 ssh 失败: {}", err))?;
-    if !output.status.success() {
-        let detail = String::from_utf8_lossy(&output.stderr).trim().to_string();
-        return Err(if detail.is_empty() {
-            format!("SSH 命令失败，退出码 {:?}", output.status.code())
-        } else {
-            detail
-        });
-    }
-    String::from_utf8(output.stdout).map_err(|err| format!("SSH 输出不是 UTF-8: {}", err))
-}
-
-fn shell_quote(value: &str) -> String {
-    format!("'{}'", value.replace('\'', "'\\''"))
-}
-
 impl ConnectionProfile {
     fn for_storage(mut self) -> Self {
         self.id = sanitize_profile_id(&self.id, &self.host);
@@ -516,15 +432,25 @@ async fn sftp_copy_from_local(
 }
 
 async fn sftp_ensure_dir(connection: &sftp::SftpConnection, remote_path: &str) -> Result<(), String> {
-    match connection.sftp.metadata(remote_path).await {
-        Ok(meta) if meta.is_dir() => Ok(()),
-        Ok(_) => Err(format!("路径已存在但不是目录: {}", remote_path)),
-        Err(_) => connection
-            .sftp
-            .create_dir(remote_path)
-            .await
-            .map_err(|e| format!("创建远程目录失败: {}", e)),
+    use russh_sftp::protocol::StatusCode;
+    let meta_err = match connection.sftp.metadata(remote_path).await {
+        Ok(meta) if meta.is_dir() => return Ok(()),
+        Ok(_) => return Err(format!("路径已存在但不是目录: {}", remote_path)),
+        Err(e) => e,
+    };
+
+    if let russh_sftp::client::error::Error::Status(status) = &meta_err {
+        if status.status_code != StatusCode::NoSuchFile {
+            // 元数据错误不是明确的“不存在”；仍尝试创建目录，
+            // 若创建失败则在错误中保留原始错误信息。
+        }
     }
+
+    connection
+        .sftp
+        .create_dir(remote_path)
+        .await
+        .map_err(|e| format!("创建远程目录失败: {} (原始错误: {})", e, meta_err))
 }
 
 #[tauri::command]
@@ -539,7 +465,7 @@ async fn upload_ssh_file(
     } else {
         format!("{}/{}", remote_dir, name)
     };
-    let conn = sftp::connect(&sftp_profile(&profile)).await?;
+    let conn = sftp::connect(&profile).await?;
     let guard = conn.lock().await;
     sftp_copy_from_local(&*guard, std::path::Path::new(&local_path), &remote_path).await
 }
@@ -550,7 +476,7 @@ async fn upload_ssh_entries(
     remote_dir: String,
     entries: Vec<UploadEntry>,
 ) -> Result<Vec<String>, String> {
-    let conn = sftp::connect(&sftp_profile(&profile)).await?;
+    let conn = sftp::connect(&profile).await?;
     let guard = conn.lock().await;
     let mut uploaded = Vec::new();
     for entry in entries {
@@ -737,7 +663,7 @@ async fn sftp_copy_to_local(
     remote_path: &str,
     local_path: &std::path::Path,
 ) -> Result<(), String> {
-    let conn = sftp::connect(&sftp_profile(profile)).await?;
+    let conn = sftp::connect(profile).await?;
     let guard = conn.lock().await;
     let meta = guard
         .sftp
