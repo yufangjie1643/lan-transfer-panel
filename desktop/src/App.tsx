@@ -14,13 +14,17 @@ import { LauncherScreen } from './features/auth/LauncherScreen';
 import { ServerFormScreen } from './features/auth/ServerFormScreen';
 import { selectDownloadDirectory } from './features/local/localFs';
 import type { FolderTreeNode } from './features/local/FolderTree';
+import { DirectoryCache } from './features/remote/directoryCache';
+import { ExplorerSettingsPanel } from './features/remote/ExplorerSettingsPanel';
+import { loadExplorerSettings, saveExplorerSettings, type ExplorerSettings } from './features/remote/explorerSettings';
 import { RemoteExplorer } from './features/remote/RemoteExplorer';
 import {
   listSshDirectory,
   prepareSshVirtualFile,
   startSshDownloadTask,
   startVirtualFileDrag,
-  testSshConnection
+  testSshConnection,
+  type SshDirectoryListing
 } from './features/remote/sshRemote';
 import { defaultLocale, messages, type Locale } from './i18n/messages';
 import { useAppStore } from './state/useAppStore';
@@ -114,6 +118,9 @@ export default function App({ initialBackendUrl = 'http://localhost:5590' }: App
   const [remoteHistory, setRemoteHistory] = useState<string[]>([]);
   const [remoteHistoryIndex, setRemoteHistoryIndex] = useState(-1);
   const [isRemoteLoading, setIsRemoteLoading] = useState(false);
+  const [explorerSettings, setExplorerSettings] = useState<ExplorerSettings>(loadExplorerSettings);
+  const [settingsOpen, setSettingsOpen] = useState(false);
+  const directoryCache = useRef(new DirectoryCache());
   const text = messages[locale];
   const appView = useAppStore((state) => state.appView);
   const editingProfileId = useAppStore((state) => state.editingProfileId);
@@ -163,14 +170,75 @@ export default function App({ initialBackendUrl = 'http://localhost:5590' }: App
     };
   }, []);
 
+  useEffect(() => {
+    if (!explorerSettings.autoRefreshEnabled || !sshProfile) return undefined;
+    const interval = setInterval(() => {
+      const ttl = explorerSettings.cacheTtlSeconds * 1000;
+      for (const path of directoryCache.current.paths()) {
+        const cached = directoryCache.current.get(path, ttl);
+        if (!cached) continue;
+        listSshDirectory(sshProfile, path)
+          .then((listing) => {
+            directoryCache.current.set(path, listing);
+            setRemoteTreeChildren((current) => ({ ...current, [listing.path]: listing.list }));
+            if (path === normalizeAbsolutePath(remotePath)) {
+              setRemoteItems('server', listing.path, listing.list);
+            }
+          })
+          .catch(() => undefined);
+      }
+    }, explorerSettings.autoRefreshIntervalSeconds * 1000);
+    return () => clearInterval(interval);
+  }, [
+    explorerSettings.autoRefreshEnabled,
+    explorerSettings.autoRefreshIntervalSeconds,
+    explorerSettings.cacheTtlSeconds,
+    remotePath,
+    setRemoteItems,
+    sshProfile
+  ]);
+
   const loadSshDirectory = useCallback(
     async (profile: ConnectionProfile, path: string) => {
-      const listing = await listSshDirectory(profile, path);
+      const normalized = normalizeAbsolutePath(path);
+      if (explorerSettings.cacheEnabled) {
+        const cached = directoryCache.current.get(normalized, explorerSettings.cacheTtlSeconds * 1000);
+        if (cached) {
+          setRemoteItems('server', cached.path, cached.list);
+          setRemoteTreeChildren((current) => ({ ...current, [cached.path]: cached.list }));
+          return cached;
+        }
+      }
+      const listing = await listSshDirectory(profile, normalized);
+      if (explorerSettings.cacheEnabled) {
+        directoryCache.current.set(normalized, listing);
+      }
       setRemoteItems('server', listing.path, listing.list);
       setRemoteTreeChildren((current) => ({ ...current, [listing.path]: listing.list }));
       return listing;
     },
-    [setRemoteItems]
+    [explorerSettings.cacheEnabled, explorerSettings.cacheTtlSeconds, setRemoteItems]
+  );
+
+  const preloadChildren = useCallback(
+    (profile: ConnectionProfile, listing: SshDirectoryListing, depth: number) => {
+      if (depth <= 0 || !explorerSettings.cacheEnabled || !explorerSettings.preloadEnabled) return;
+      for (const item of listing.list) {
+        if (!item.IsDir) continue;
+        const childPath = item.Path || item.Name;
+        if (directoryCache.current.has(childPath)) continue;
+        listSshDirectory(profile, childPath)
+          .then((childListing) => {
+            directoryCache.current.set(childPath, childListing);
+            setRemoteTreeChildren((current) => ({
+              ...current,
+              [childListing.path]: childListing.list
+            }));
+          })
+          .catch(() => undefined);
+      }
+    },
+    [explorerSettings.cacheEnabled, explorerSettings.preloadEnabled]
   );
 
   const remoteTreeNodes = useMemo(
@@ -190,6 +258,7 @@ export default function App({ initialBackendUrl = 'http://localhost:5590' }: App
       setIsRemoteLoading(true);
       try {
         const listing = await loadSshDirectory(sshProfile, normalizeAbsolutePath(path));
+        preloadChildren(sshProfile, listing, explorerSettings.preloadDepth);
         const nextPath = listing.path;
         if (mode === 'history') return;
         setRemoteHistory((current) => {
@@ -210,7 +279,7 @@ export default function App({ initialBackendUrl = 'http://localhost:5590' }: App
         setIsRemoteLoading(false);
       }
     },
-    [loadSshDirectory, remoteHistoryIndex, sshProfile]
+    [loadSshDirectory, preloadChildren, remoteHistoryIndex, sshProfile, explorerSettings.preloadDepth]
   );
 
   const [isSavingProfile, setIsSavingProfile] = useState(false);
@@ -287,7 +356,8 @@ export default function App({ initialBackendUrl = 'http://localhost:5590' }: App
       setSelectedRemoteKeys(new Set());
       setIsRemoteLoading(true);
       try {
-        await loadSshDirectory(credentials, root);
+        const rootListing = await loadSshDirectory(credentials, root);
+        preloadChildren(credentials, rootListing, explorerSettings.preloadDepth);
       } finally {
         setIsRemoteLoading(false);
       }
@@ -408,6 +478,7 @@ export default function App({ initialBackendUrl = 'http://localhost:5590' }: App
     setExpandedRemotePaths(new Set(['/']));
     setRemoteHistory([]);
     setRemoteHistoryIndex(-1);
+    directoryCache.current.clear();
     setAppView('launcher');
   }
 
@@ -606,6 +677,9 @@ export default function App({ initialBackendUrl = 'http://localhost:5590' }: App
           <button type="button" className="link-button" onClick={handleSwitchConnection}>
             {text.connection.switchConnection}
           </button>
+          <button type="button" className="link-button" onClick={() => setSettingsOpen(true)}>
+            {text.explorer.settings.title}
+          </button>
           <label className="language-switch">
             {text.language.label}
             <select value={locale} onChange={(event) => setLocale(event.target.value as Locale)}>
@@ -675,6 +749,17 @@ export default function App({ initialBackendUrl = 'http://localhost:5590' }: App
           onNativeDragStart={handleNativeDragStart}
         />
       </section>
+      {settingsOpen ? (
+        <ExplorerSettingsPanel
+          labels={text.explorer.settings}
+          settings={explorerSettings}
+          onChange={(next) => {
+            setExplorerSettings(next);
+            saveExplorerSettings(next);
+          }}
+          onClose={() => setSettingsOpen(false)}
+        />
+      ) : null}
     </main>
   );
 }

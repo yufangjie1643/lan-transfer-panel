@@ -146,6 +146,16 @@ interface Messages {
       selected: (count: number) => string;
       loading: string;
     };
+    settings: {
+      title: string;
+      cacheEnabled: string;
+      cacheTtl: string;
+      preloadEnabled: string;
+      preloadDepth: string;
+      autoRefreshEnabled: string;
+      autoRefreshInterval: string;
+      close: string;
+    };
   };
   errors: {
     openDirectoryFailed: string;
@@ -303,6 +313,16 @@ export const messages: Record<Locale, Messages> = {
         items: (count) => `${count} 个项目`,
         selected: (count) => `已选择 ${count} 个`,
         loading: '加载中...'
+      },
+      settings: {
+        title: '浏览设置',
+        cacheEnabled: '启用目录缓存',
+        cacheTtl: '缓存有效期（秒）',
+        preloadEnabled: '预加载子目录',
+        preloadDepth: '预加载深度',
+        autoRefreshEnabled: '定时刷新缓存目录',
+        autoRefreshInterval: '刷新间隔（秒）',
+        close: '关闭'
       }
     },
     errors: {
@@ -457,6 +477,16 @@ export const messages: Record<Locale, Messages> = {
         items: (count) => `${count} items`,
         selected: (count) => `${count} selected`,
         loading: 'Loading...'
+      },
+      settings: {
+        title: 'Browse settings',
+        cacheEnabled: 'Enable directory cache',
+        cacheTtl: 'Cache TTL (seconds)',
+        preloadEnabled: 'Preload subdirectories',
+        preloadDepth: 'Preload depth',
+        autoRefreshEnabled: 'Auto-refresh cached directories',
+        autoRefreshInterval: 'Refresh interval (seconds)',
+        close: 'Close'
       }
     },
     errors: {

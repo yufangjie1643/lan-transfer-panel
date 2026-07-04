@@ -991,3 +991,77 @@ body {
   height: 14px;
   margin: 0;
 }
+
+/* Explorer settings panel */
+
+.explorer-settings-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 100;
+  display: grid;
+  place-items: center;
+  background: rgba(15, 23, 42, 0.35);
+}
+
+.explorer-settings-panel {
+  width: min(360px, calc(100vw - 32px));
+  padding: 18px;
+  border-radius: 8px;
+  background: #fff;
+  box-shadow: 0 18px 45px rgba(15, 23, 42, 0.15);
+}
+
+.explorer-settings-panel h3 {
+  margin: 0 0 14px;
+  font-size: 16px;
+}
+
+.settings-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 8px 0;
+  color: #334155;
+  font-size: 13px;
+}
+
+.settings-row span {
+  flex: 1;
+}
+
+.settings-row input[type="checkbox"] {
+  width: 16px;
+  height: 16px;
+}
+
+.settings-row input[type="number"] {
+  width: 80px;
+  height: 28px;
+  padding: 0 6px;
+  border: 1px solid #c6ced8;
+  border-radius: 4px;
+  text-align: right;
+}
+
+.settings-actions {
+  display: flex;
+  justify-content: flex-end;
+  margin-top: 14px;
+  padding-top: 12px;
+  border-top: 1px solid #e5eaf0;
+}
+
+.settings-actions button {
+  height: 30px;
+  padding: 0 14px;
+  border: 1px solid #c6ced8;
+  border-radius: 4px;
+  background: #fff;
+  color: #334155;
+  font: inherit;
+  cursor: pointer;
+}
+
+.settings-actions button:hover {
+  background: #f3f6fa;
+}
