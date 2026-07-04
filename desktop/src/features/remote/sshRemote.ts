@@ -43,6 +43,36 @@ export function startSshDownloadTask(
   });
 }
 
+export function startSshAria2Download(
+  profile: ConnectionProfile,
+  remotePath: string,
+  localDir: string,
+  name: string,
+  isDir: boolean
+) {
+  return invoke<string[]>('start_ssh_aria2_download', {
+    profile,
+    remotePath,
+    localDir,
+    name,
+    isDir
+  });
+}
+
+export interface Aria2Config {
+  rpcUrl: string;
+  rpcSecret: string;
+  defaultDir: string;
+}
+
+export function getAria2Config() {
+  return invoke<Aria2Config>('get_aria2_config');
+}
+
+export function saveAria2Config(config: Aria2Config) {
+  return invoke<void>('save_aria2_config', { config });
+}
+
 export function listTransferTasks() {
   return invoke<DownloadTasksResponse>('list_transfer_tasks');
 }

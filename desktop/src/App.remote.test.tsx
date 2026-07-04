@@ -60,7 +60,7 @@ describe('remote shell after SSH login', () => {
 
     await waitFor(() => {
       expect(invoke).toHaveBeenCalledWith('select_download_directory');
-      expect(invoke).toHaveBeenCalledWith('download_ssh_file', {
+      expect(invoke).toHaveBeenCalledWith('start_ssh_aria2_download', {
         profile: expect.objectContaining({
           host: '10.42.0.1',
           port: 2687,
@@ -68,14 +68,10 @@ describe('remote shell after SSH login', () => {
           authMethod: 'key'
         }),
         remotePath: '/home/yufan/logs_2.sqlite',
-        localDir: 'D:\\download'
+        localDir: 'D:\\download',
+        name: 'logs_2.sqlite',
+        isDir: false
       });
-      expect(invoke).not.toHaveBeenCalledWith(
-        'start_ssh_download_task',
-        expect.objectContaining({
-          remotePath: '/home/yufan/logs_2.sqlite'
-        })
-      );
     });
   });
 
@@ -92,7 +88,7 @@ describe('remote shell after SSH login', () => {
     fireEvent.click(screen.getByRole('button', { name: '下载' }));
 
     await waitFor(() => {
-      expect(invoke).toHaveBeenCalledWith('start_ssh_download_task', {
+      expect(invoke).toHaveBeenCalledWith('start_ssh_aria2_download', {
         profile: expect.objectContaining({
           host: '10.42.0.1',
           port: 2687,
@@ -101,9 +97,8 @@ describe('remote shell after SSH login', () => {
         }),
         remotePath: '/home/yufan/.codex',
         localDir: 'D:\\download',
-        recursive: true,
         name: '.codex',
-        size: undefined
+        isDir: true
       });
     });
     expect(screen.queryByText('文件夹下载已取消；当前只支持单文件下载。')).not.toBeInTheDocument();

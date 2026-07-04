@@ -58,6 +58,15 @@ pub struct ClientHandler {
     port: u16,
 }
 
+impl ClientHandler {
+    pub fn new(host: &str, port: u16) -> Self {
+        Self {
+            host: host.to_string(),
+            port,
+        }
+    }
+}
+
 impl client::Handler for ClientHandler {
     type Error = ClientHandlerError;
 

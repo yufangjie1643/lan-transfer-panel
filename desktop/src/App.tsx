@@ -19,11 +19,10 @@ import { ExplorerSettingsPanel } from './features/remote/ExplorerSettingsPanel';
 import { loadExplorerSettings, saveExplorerSettings, type ExplorerSettings } from './features/remote/explorerSettings';
 import { RemoteExplorer } from './features/remote/RemoteExplorer';
 import {
-  downloadSshFile,
   listSshDirectory,
   prepareSshVirtualFile,
   selectUploadFiles,
-  startSshDownloadTask,
+  startSshAria2Download,
   startVirtualFileDrag,
   testSshConnection,
   uploadSshEntries,
@@ -438,18 +437,13 @@ export default function App({ initialBackendUrl = 'http://localhost:5590' }: App
         setError(null);
         const directory = await selectDownloadDirectory();
         if (!directory) return;
-        if (item.IsDir) {
-          await startSshDownloadTask(
-            sshProfile,
-            item.Path || item.Name,
-            directory,
-            true,
-            item.Name,
-            item.Size
-          );
-        } else {
-          await downloadSshFile(sshProfile, item.Path || item.Name, directory);
-        }
+        await startSshAria2Download(
+          sshProfile,
+          item.Path || item.Name,
+          directory,
+          item.Name,
+          !!item.IsDir
+        );
       } catch (downloadError) {
         setError(downloadError instanceof Error ? downloadError.message : text.errors.downloadFailed);
       }
@@ -639,18 +633,13 @@ export default function App({ initialBackendUrl = 'http://localhost:5590' }: App
         selectedRemoteKeys.has(item.Path || item.Name)
       );
       for (const item of selectedItems) {
-        if (item.IsDir) {
-          await startSshDownloadTask(
-            sshProfile,
-            item.Path || item.Name,
-            directory,
-            true,
-            item.Name,
-            item.Size
-          );
-        } else {
-          await downloadSshFile(sshProfile, item.Path || item.Name, directory);
-        }
+        await startSshAria2Download(
+          sshProfile,
+          item.Path || item.Name,
+          directory,
+          item.Name,
+          !!item.IsDir
+        );
       }
     } catch (downloadError) {
       setError(downloadError instanceof Error ? downloadError.message : text.errors.downloadFailed);

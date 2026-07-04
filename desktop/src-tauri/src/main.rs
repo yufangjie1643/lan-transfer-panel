@@ -12,6 +12,11 @@ use chrono::{DateTime, Utc};
 mod windows_virtual_drag;
 
 mod sftp;
+mod ssh_exec;
+mod tunnel;
+mod remote_serve;
+mod aria2_rpc;
+mod download;
 
 use sftp::ConnectionProfile;
 
@@ -553,6 +558,53 @@ async fn start_ssh_download_task(
 
 #[tauri::command]
 fn list_transfer_tasks() -> Result<TransferQueueResponse, String> {
+    // Try aria2 RPC first
+    let task_keys = ["gid", "status", "totalLength", "completedLength", "downloadSpeed", "errorMessage"];
+    if aria2_rpc::is_available() {
+        let active = aria2_rpc::tell_active(&task_keys).unwrap_or_default();
+        let waiting = aria2_rpc::tell_waiting(0, 50, &task_keys).unwrap_or_default();
+        let stopped = aria2_rpc::tell_stopped(0, 50, &task_keys).unwrap_or_default();
+
+        let to_task = |v: &serde_json::Value| TransferTask {
+            gid: v["gid"].as_str().unwrap_or("").to_string(),
+            status: v["status"].as_str().unwrap_or("unknown").to_string(),
+            total_length: v["totalLength"].as_str().map(|s| s.to_string()),
+            completed_length: v["completedLength"].as_str().map(|s| s.to_string()),
+            download_speed: v["downloadSpeed"].as_str().map(|s| s.to_string()),
+            error_message: v["errorMessage"].as_str().filter(|s| !s.is_empty()).map(|s| s.to_string()),
+        };
+
+        let mut global_stat = std::collections::HashMap::new();
+        if let Ok(stat) = aria2_rpc::get_global_stat() {
+            if let Some(obj) = stat.as_object() {
+                for (k, v) in obj {
+                    if let Some(s) = v.as_str() {
+                        global_stat.insert(k.clone(), s.to_string());
+                    }
+                }
+            }
+        }
+
+        // Merge with in-memory SFTP tasks
+        let sftp_tasks = queue().lock().map_err(|err| err.to_string())?.clone();
+
+        let mut all_active: Vec<TransferTask> = active.iter().map(to_task).collect();
+        all_active.extend(sftp_tasks.iter().filter(|t| t.status == "active").cloned());
+
+        let all_waiting: Vec<TransferTask> = waiting.iter().map(to_task).collect();
+
+        let mut all_stopped: Vec<TransferTask> = stopped.iter().map(to_task).collect();
+        all_stopped.extend(sftp_tasks.into_iter().filter(|t| t.status != "active"));
+
+        return Ok(TransferQueueResponse {
+            global_stat,
+            active: all_active,
+            waiting: all_waiting,
+            stopped: all_stopped,
+        });
+    }
+
+    // Fallback: in-memory queue only
     let tasks = queue().lock().map_err(|err| err.to_string())?.clone();
     Ok(TransferQueueResponse {
         global_stat: std::collections::HashMap::new(),
@@ -567,13 +619,28 @@ fn list_transfer_tasks() -> Result<TransferQueueResponse, String> {
 
 #[tauri::command]
 fn control_transfer_task(gid: String, action: String) -> Result<(), String> {
-    let mut tasks = queue().lock().map_err(|err| err.to_string())?;
-    match action.as_str() {
-        "remove" | "purge" => tasks.retain(|task| task.gid != gid),
-        "pause" | "unpause" => {}
-        _ => return Err("不支持的队列操作".to_string()),
+    // aria2 gids are hex strings (typically 16 chars)
+    let is_aria2_gid = gid.chars().all(|c| c.is_ascii_hexdigit()) && gid.len() >= 8;
+
+    if is_aria2_gid && aria2_rpc::is_available() {
+        match action.as_str() {
+            "pause" => aria2_rpc::pause(&gid),
+            "unpause" => aria2_rpc::unpause(&gid),
+            "remove" | "purge" => {
+                let _ = aria2_rpc::remove(&gid);
+                aria2_rpc::remove_download_result(&gid)
+            }
+            _ => Err("不支持的队列操作".to_string()),
+        }
+    } else {
+        let mut tasks = queue().lock().map_err(|err| err.to_string())?;
+        match action.as_str() {
+            "remove" | "purge" => tasks.retain(|task| task.gid != gid),
+            "pause" | "unpause" => {}
+            _ => return Err("不支持的队列操作".to_string()),
+        }
+        Ok(())
     }
-    Ok(())
 }
 
 fn queue() -> &'static Mutex<Vec<TransferTask>> {
@@ -773,6 +840,117 @@ fn open_devtools(window: tauri::WebviewWindow) {
     window.open_devtools();
 }
 
+// ---------------------------------------------------------------------------
+// aria2 download commands
+// ---------------------------------------------------------------------------
+
+#[tauri::command]
+async fn start_ssh_aria2_download(
+    profile: ConnectionProfile,
+    remote_path: String,
+    local_dir: String,
+    name: String,
+    is_dir: bool,
+) -> Result<Vec<String>, String> {
+    if is_dir {
+        let gids = download::download_folder_via_aria2(&profile, &remote_path, &local_dir).await;
+        match gids {
+            Ok(gids) => Ok(gids),
+            Err(aria_err) => {
+                // Fallback to SFTP
+                let id = TRANSFER_COUNTER.fetch_add(1, Ordering::Relaxed);
+                let gid = format!("ssh-{}-{}", id, safe_task_name(&name));
+                let task = TransferTask {
+                    gid: gid.clone(),
+                    status: "active".to_string(),
+                    total_length: None,
+                    completed_length: Some("0".to_string()),
+                    download_speed: Some("0".to_string()),
+                    error_message: Some(format!("aria2 不可用，使用 SFTP 降级: {}", aria_err)),
+                };
+                queue().lock().map_err(|err| err.to_string())?.push(task);
+                let task_gid = gid.clone();
+                tokio::spawn(async move {
+                    let result = sftp_download_folder_recursive(
+                        &profile,
+                        &remote_path,
+                        Path::new(&local_dir),
+                    )
+                    .await;
+                    if let Ok(mut tasks) = queue().lock() {
+                        if let Some(task) = tasks.iter_mut().find(|t| t.gid == task_gid) {
+                            match result {
+                                Ok(_) => {
+                                    task.status = "complete".to_string();
+                                    task.completed_length = Some("1".to_string());
+                                }
+                                Err(error) => {
+                                    task.status = "error".to_string();
+                                    task.error_message = Some(error);
+                                }
+                            }
+                        }
+                    }
+                });
+                Ok(vec![gid])
+            }
+        }
+    } else {
+        let gid = download::download_file_via_aria2(&profile, &remote_path, &local_dir).await;
+        match gid {
+            Ok(gid) => Ok(vec![gid]),
+            Err(aria_err) => {
+                // Fallback to SFTP single file
+                let id = TRANSFER_COUNTER.fetch_add(1, Ordering::Relaxed);
+                let task_gid = format!("ssh-{}-{}", id, safe_task_name(&name));
+                let task = TransferTask {
+                    gid: task_gid.clone(),
+                    status: "active".to_string(),
+                    total_length: None,
+                    completed_length: Some("0".to_string()),
+                    download_speed: Some("0".to_string()),
+                    error_message: Some(format!("aria2 不可用，使用 SFTP 降级: {}", aria_err)),
+                };
+                queue().lock().map_err(|err| err.to_string())?.push(task);
+                let clone_gid = task_gid.clone();
+                tokio::spawn(async move {
+                    let file_name = Path::new(&remote_path)
+                        .file_name()
+                        .map(|s| s.to_string_lossy().to_string())
+                        .unwrap_or_else(|| "download".to_string());
+                    let local_path = Path::new(&local_dir).join(safe_local_file_name(&file_name));
+                    let result = sftp_copy_to_local(&profile, &remote_path, &local_path).await;
+                    if let Ok(mut tasks) = queue().lock() {
+                        if let Some(task) = tasks.iter_mut().find(|t| t.gid == clone_gid) {
+                            match result {
+                                Ok(_) => {
+                                    task.status = "complete".to_string();
+                                    task.completed_length = Some("1".to_string());
+                                }
+                                Err(error) => {
+                                    task.status = "error".to_string();
+                                    task.error_message = Some(error);
+                                }
+                            }
+                        }
+                    }
+                });
+                Ok(vec![task_gid])
+            }
+        }
+    }
+}
+
+#[tauri::command]
+fn get_aria2_config() -> aria2_rpc::Aria2Config {
+    aria2_rpc::load_config()
+}
+
+#[tauri::command]
+fn save_aria2_config(config: aria2_rpc::Aria2Config) -> Result<(), String> {
+    aria2_rpc::save_config(&config)
+}
+
 fn main() {
     tauri::Builder::default()
         .invoke_handler(tauri::generate_handler![
@@ -791,11 +969,21 @@ fn main() {
             download_ssh_file,
             download_ssh_folder,
             start_ssh_download_task,
+            start_ssh_aria2_download,
+            get_aria2_config,
+            save_aria2_config,
             list_transfer_tasks,
             control_transfer_task,
             prepare_ssh_virtual_file,
             start_virtual_file_drag
         ])
+        .on_window_event(|_window, event| {
+            if let tauri::WindowEvent::Destroyed = event {
+                aria2_rpc::shutdown();
+                tunnel::shutdown_all();
+                remote_serve::shutdown_all();
+            }
+        })
         .run(tauri::generate_context!())
         .expect("failed to run LAN Transfer desktop app");
 }

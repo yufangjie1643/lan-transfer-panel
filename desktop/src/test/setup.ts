@@ -70,6 +70,15 @@ vi.mock('@tauri-apps/api/core', () => ({
     if (command === 'start_ssh_download_task') {
       return Promise.resolve('ssh-1-logs_2.sqlite');
     }
+    if (command === 'start_ssh_aria2_download') {
+      return Promise.resolve(['aria2-gid-001']);
+    }
+    if (command === 'get_aria2_config') {
+      return Promise.resolve({ rpcUrl: 'http://127.0.0.1:6800/jsonrpc', rpcSecret: '', defaultDir: '' });
+    }
+    if (command === 'save_aria2_config') {
+      return Promise.resolve();
+    }
     if (command === 'list_transfer_tasks') {
       return Promise.resolve({
         globalStat: {},
