@@ -1,6 +1,6 @@
 use std::collections::HashMap;
 use std::path::Path;
-use std::sync::{Arc, Mutex};
+use std::sync::Arc;
 use once_cell::sync::Lazy;
 use russh::client::{self, Handle};
 use russh::keys::{load_secret_key, PrivateKeyWithHashAlg};
@@ -50,36 +50,33 @@ impl client::Handler for ClientHandler {
     }
 }
 
-static POOL: Lazy<Mutex<HashMap<String, Arc<tokio::sync::Mutex<Option<SftpConnection>>>>>> =
-    Lazy::new(|| Mutex::new(HashMap::new()));
+static POOL: Lazy<tokio::sync::Mutex<HashMap<String, Arc<tokio::sync::Mutex<SftpConnection>>>>> =
+    Lazy::new(|| tokio::sync::Mutex::new(HashMap::new()));
 
-pub fn connection_key(profile: &ConnectionProfile) -> String {
-    format!("{}@{}:{}", profile.username, profile.host, profile.port)
+fn trimmed_profile_parts(profile: &ConnectionProfile) -> (String, String) {
+    (profile.username.trim().to_string(), profile.host.trim().to_string())
 }
 
-pub async fn connect(profile: &ConnectionProfile) -> Result<Arc<tokio::sync::Mutex<Option<SftpConnection>>>, String> {
+pub fn connection_key(profile: &ConnectionProfile) -> String {
+    let (username, host) = trimmed_profile_parts(profile);
+    format!("{}@{}:{}", username, host, profile.port)
+}
+
+pub async fn connect(profile: &ConnectionProfile) -> Result<Arc<tokio::sync::Mutex<SftpConnection>>, String> {
     let key = connection_key(profile);
-    {
-        let pool = POOL.lock().map_err(|e| e.to_string())?;
-        if let Some(entry) = pool.get(&key) {
-            return Ok(entry.clone());
-        }
+    let mut pool = POOL.lock().await;
+    if let Some(entry) = pool.get(&key) {
+        return Ok(entry.clone());
     }
 
-    let entry = Arc::new(tokio::sync::Mutex::new(None));
-    {
-        let mut pool = POOL.lock().map_err(|e| e.to_string())?;
-        pool.insert(key.clone(), entry.clone());
-    }
-
-    let connected = do_connect(profile).await?;
-    *entry.lock().await = Some(connected);
+    let connection = do_connect(profile).await?;
+    let entry = Arc::new(tokio::sync::Mutex::new(connection));
+    pool.insert(key, entry.clone());
     Ok(entry)
 }
 
 async fn do_connect(profile: &ConnectionProfile) -> Result<SftpConnection, String> {
-    let host = profile.host.trim();
-    let username = profile.username.trim();
+    let (username, host) = trimmed_profile_parts(profile);
     if host.is_empty() {
         return Err("缺少 SSH 主机".to_string());
     }
@@ -112,10 +109,15 @@ async fn do_connect(profile: &ConnectionProfile) -> Result<SftpConnection, Strin
 }
 
 async fn authenticate(handle: &mut Handle<ClientHandler>, profile: &ConnectionProfile) -> Result<(), String> {
+    let username = profile.username.trim();
     if profile.auth_method == "password" {
-        let password = profile.password.as_deref().unwrap_or("");
+        let password = profile
+            .password
+            .as_deref()
+            .filter(|p| !p.trim().is_empty())
+            .ok_or_else(|| "缺少 SSH 密码".to_string())?;
         let result = handle
-            .authenticate_password(&profile.username, password)
+            .authenticate_password(username, password)
             .await
             .map_err(|e| format!("密码认证失败: {}", e))?;
         if !result.success() {
@@ -133,7 +135,7 @@ async fn authenticate(handle: &mut Handle<ClientHandler>, profile: &ConnectionPr
     let key = load_secret_key(Path::new(key_path), passphrase)
         .map_err(|e| format!("加载私钥失败: {}", e))?;
     let result = handle
-        .authenticate_publickey(&profile.username, PrivateKeyWithHashAlg::new(Arc::new(key), None))
+        .authenticate_publickey(username, PrivateKeyWithHashAlg::new(Arc::new(key), None))
         .await
         .map_err(|e| format!("密钥认证失败: {}", e))?;
     if !result.success() {
