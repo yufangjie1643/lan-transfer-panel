@@ -484,24 +484,27 @@ fn collect_upload_entry(
 }
 
 #[tauri::command]
-async fn select_upload_files() -> Option<Vec<String>> {
-    rfd::AsyncFileDialog::new()
-        .pick_files()
-        .await
-        .map(|files| files.into_iter().map(|file| file.path().to_string_lossy().to_string()).collect())
+async fn select_upload_files() -> Result<Option<Vec<String>>, String> {
+    match rfd::AsyncFileDialog::new().pick_files().await {
+        Some(files) => Ok(Some(
+            files
+                .into_iter()
+                .map(|file| file.path().to_string_lossy().to_string())
+                .collect(),
+        )),
+        None => Ok(None),
+    }
 }
 
 async fn sftp_copy_from_local(
-    profile: &ConnectionProfile,
+    connection: &sftp::SftpConnection,
     local_path: &std::path::Path,
     remote_path: &str,
 ) -> Result<(), String> {
-    let conn = sftp::connect(&sftp_profile(profile)).await?;
-    let guard = conn.lock().await;
     let mut local = tokio::fs::File::open(local_path)
         .await
         .map_err(|e| format!("打开本地文件失败: {}", e))?;
-    let mut remote = guard
+    let mut remote = connection
         .sftp
         .create(remote_path)
         .await
@@ -510,6 +513,18 @@ async fn sftp_copy_from_local(
         .await
         .map_err(|e| format!("上传文件失败: {}", e))?;
     Ok(())
+}
+
+async fn sftp_ensure_dir(connection: &sftp::SftpConnection, remote_path: &str) -> Result<(), String> {
+    match connection.sftp.metadata(remote_path).await {
+        Ok(meta) if meta.is_dir() => Ok(()),
+        Ok(_) => Err(format!("路径已存在但不是目录: {}", remote_path)),
+        Err(_) => connection
+            .sftp
+            .create_dir(remote_path)
+            .await
+            .map_err(|e| format!("创建远程目录失败: {}", e)),
+    }
 }
 
 #[tauri::command]
@@ -524,7 +539,9 @@ async fn upload_ssh_file(
     } else {
         format!("{}/{}", remote_dir, name)
     };
-    sftp_copy_from_local(&profile, std::path::Path::new(&local_path), &remote_path).await
+    let conn = sftp::connect(&sftp_profile(&profile)).await?;
+    let guard = conn.lock().await;
+    sftp_copy_from_local(&*guard, std::path::Path::new(&local_path), &remote_path).await
 }
 
 #[tauri::command]
@@ -533,6 +550,8 @@ async fn upload_ssh_entries(
     remote_dir: String,
     entries: Vec<UploadEntry>,
 ) -> Result<Vec<String>, String> {
+    let conn = sftp::connect(&sftp_profile(&profile)).await?;
+    let guard = conn.lock().await;
     let mut uploaded = Vec::new();
     for entry in entries {
         let remote_path = if remote_dir.ends_with('/') {
@@ -541,15 +560,9 @@ async fn upload_ssh_entries(
             format!("{}/{}", remote_dir, entry.relative_path)
         };
         if entry.is_dir {
-            let conn = sftp::connect(&sftp_profile(&profile)).await?;
-            let guard = conn.lock().await;
-            guard
-                .sftp
-                .create_dir(&remote_path)
-                .await
-                .map_err(|e| format!("创建远程目录失败: {}", e))?;
+            sftp_ensure_dir(&*guard, &remote_path).await?;
         } else {
-            sftp_copy_from_local(&profile, std::path::Path::new(&entry.source_path), &remote_path).await?;
+            sftp_copy_from_local(&*guard, std::path::Path::new(&entry.source_path), &remote_path).await?;
         }
         uploaded.push(remote_path);
     }
