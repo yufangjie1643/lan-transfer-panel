@@ -45,7 +45,7 @@ export function AddressBar({ labels, remoteName, path, onNavigate }: AddressBarP
 
   if (isEditing) {
     return (
-      <div className="explorer-address-bar editing">
+      <div className="explorer-address-bar editing" data-testid="address-bar">
         <input
           ref={inputRef}
           aria-label={labels.editPath}
@@ -62,7 +62,7 @@ export function AddressBar({ labels, remoteName, path, onNavigate }: AddressBarP
   }
 
   return (
-    <div className="explorer-address-bar">
+    <div className="explorer-address-bar" data-testid="address-bar">
       {segments.map((segment, index) => (
         <span key={segmentPaths[index]} className="address-segment">
           {index > 0 ? <span className="address-separator">›</span> : null}

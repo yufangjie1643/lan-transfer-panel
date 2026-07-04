@@ -1,6 +1,7 @@
-import { fireEvent, render, screen, waitFor } from '@testing-library/react';
+import { fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { invoke } from '@tauri-apps/api/core';
+import { WebviewWindow } from '@tauri-apps/api/webviewWindow';
 import App from './App';
 import { useAppStore } from './state/useAppStore';
 
@@ -31,20 +32,31 @@ describe('remote shell after SSH login', () => {
     expect(screen.getByRole('treeitem', { name: '/' })).toBeInTheDocument();
     expect(screen.getByRole('treeitem', { name: 'home' })).toBeInTheDocument();
     expect(screen.getByRole('treeitem', { name: 'yufan' })).toBeInTheDocument();
-    expect(screen.getByText('logs_2.sqlite')).toBeInTheDocument();
-    expect(screen.getByRole('button', { name: '下载到... logs_2.sqlite' })).toBeInTheDocument();
-    expect(screen.getByLabelText('远程路径')).toHaveValue('/home/yufan');
-    expect(screen.queryByText('本地文件')).not.toBeInTheDocument();
+    expect(screen.getByRole('gridcell', { name: 'logs_2.sqlite' })).toBeInTheDocument();
+    expect(screen.getByRole('gridcell', { name: '.codex' })).toBeInTheDocument();
+
+    const addressBar = screen.getByTestId('address-bar');
+    expect(within(addressBar).getByRole('button', { name: 'server' })).toBeInTheDocument();
+    expect(within(addressBar).getByRole('button', { name: 'home' })).toBeInTheDocument();
+    expect(within(addressBar).getByRole('button', { name: 'yufan' })).toBeInTheDocument();
+
+    expect(screen.getByText('2 个项目')).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: '下载' })).toBeDisabled();
+    expect(screen.queryByText('选择服务器')).not.toBeInTheDocument();
   });
 
-  it('downloads a remote file through SSH after choosing a local directory', async () => {
+  it('selects a remote file and downloads it through the toolbar', async () => {
     render(<App />);
 
     await waitFor(() => expect(screen.getByText('yufanssh')).toBeInTheDocument());
     fireEvent.click(screen.getByRole('button', { name: '连接' }));
     await waitFor(() => expect(screen.getByText('logs_2.sqlite')).toBeInTheDocument());
 
-    fireEvent.click(screen.getByRole('button', { name: '下载到... logs_2.sqlite' }));
+    fireEvent.click(screen.getByText('logs_2.sqlite'));
+    await waitFor(() => expect(screen.getByText('已选择 1 个')).toBeInTheDocument());
+    expect(screen.getByRole('button', { name: '下载' })).not.toBeDisabled();
+
+    fireEvent.click(screen.getByRole('button', { name: '下载' }));
 
     await waitFor(() => {
       expect(invoke).toHaveBeenCalledWith('select_download_directory');
@@ -64,16 +76,17 @@ describe('remote shell after SSH login', () => {
     });
   });
 
-  it('keeps folder downloads available from the download button', async () => {
+  it('selects a folder and downloads it recursively through the toolbar', async () => {
     render(<App />);
 
     await waitFor(() => expect(screen.getByText('yufanssh')).toBeInTheDocument());
     fireEvent.click(screen.getByRole('button', { name: '连接' }));
-    await waitFor(() =>
-      expect(screen.getByRole('button', { name: '下载到... .codex' })).toBeInTheDocument()
-    );
+    const codexCell = await waitFor(() => screen.getByRole('gridcell', { name: '.codex' }));
 
-    fireEvent.click(screen.getByRole('button', { name: '下载到... .codex' }));
+    fireEvent.click(codexCell);
+    await waitFor(() => expect(screen.getByText('已选择 1 个')).toBeInTheDocument());
+
+    fireEvent.click(screen.getByRole('button', { name: '下载' }));
 
     await waitFor(() => {
       expect(invoke).toHaveBeenCalledWith('start_ssh_download_task', {
@@ -93,14 +106,17 @@ describe('remote shell after SSH login', () => {
     expect(screen.queryByText('文件夹下载已取消；当前只支持单文件下载。')).not.toBeInTheDocument();
   });
 
-  it('opens the desktop transfer queue after SSH login', async () => {
+  it('opens the desktop transfer queue from the toolbar', async () => {
     render(<App />);
 
     await waitFor(() => expect(screen.getByText('yufanssh')).toBeInTheDocument());
     fireEvent.click(screen.getByRole('button', { name: '连接' }));
     await waitFor(() => expect(screen.getByText('已连接：yufan@10.42.0.1:2687')).toBeInTheDocument());
-    fireEvent.click(screen.getByRole('button', { name: '传输队列' }));
+    fireEvent.click(screen.getByRole('button', { name: '队列' }));
 
-    expect(screen.queryByText('传输队列将在 SSH 下载接入后启用')).not.toBeInTheDocument();
+    expect(WebviewWindow).toHaveBeenCalledWith(
+      'transfer-queue',
+      expect.objectContaining({ title: '传输队列' })
+    );
   });
 });
