@@ -292,6 +292,7 @@ body {
   display: grid;
   grid-template-rows: auto auto minmax(0, 1fr) auto;
   grid-template-columns: minmax(0, 1fr);
+  overflow: hidden;
   background: #fff;
 }
 
@@ -652,12 +653,17 @@ body {
 /* Explorer layout */
 
 .explorer-toolbar {
+  position: relative;
+  z-index: 2;
   display: flex;
   align-items: center;
   gap: 12px;
-  padding: 6px 10px;
+  height: 40px;
+  padding: 0 10px;
   border-bottom: 1px solid #e5eaf0;
   background: #f8fafc;
+  flex-wrap: nowrap;
+  overflow: hidden;
 }
 
 .toolbar-group {
@@ -691,12 +697,23 @@ body {
 }
 
 .explorer-address-bar {
+  position: relative;
+  z-index: 2;
   display: flex;
   align-items: center;
   gap: 4px;
-  padding: 5px 10px;
+  height: 32px;
+  padding: 0 10px;
   border-bottom: 1px solid #e5eaf0;
   background: #fff;
+  white-space: nowrap;
+  overflow-x: auto;
+  overflow-y: hidden;
+  scrollbar-width: none;
+}
+
+.explorer-address-bar::-webkit-scrollbar {
+  display: none;
 }
 
 .explorer-address-bar.editing input {
@@ -880,4 +897,39 @@ body {
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+}
+
+/* Independent, styled scrollbars for Explorer panes */
+
+.folder-tree,
+.file-list {
+  scrollbar-width: thin;
+  scrollbar-color: #c6ced8 transparent;
+}
+
+.folder-tree::-webkit-scrollbar,
+.file-list::-webkit-scrollbar {
+  width: 8px;
+  height: 8px;
+}
+
+.folder-tree::-webkit-scrollbar-track,
+.file-list::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+.folder-tree::-webkit-scrollbar-thumb,
+.file-list::-webkit-scrollbar-thumb {
+  background: #c6ced8;
+  border-radius: 4px;
+}
+
+.folder-tree::-webkit-scrollbar-thumb:hover,
+.file-list::-webkit-scrollbar-thumb:hover {
+  background: #9aa7b5;
+}
+
+.folder-tree::-webkit-scrollbar-corner,
+.file-list::-webkit-scrollbar-corner {
+  background: transparent;
 }

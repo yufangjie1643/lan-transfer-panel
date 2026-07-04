@@ -427,6 +427,22 @@ export default function App({ initialBackendUrl = 'http://localhost:5590' }: App
     }
   }
 
+  async function handleTreeToggle(path: string) {
+    setExpandedRemotePaths((current) => {
+      const next = new Set(current);
+      if (next.has(path)) next.delete(path);
+      else next.add(path);
+      return next;
+    });
+    if (remoteTreeChildren[path] || !sshProfile) return;
+    try {
+      const listing = await listSshDirectory(sshProfile, path);
+      setRemoteTreeChildren((current) => ({ ...current, [listing.path]: listing.list }));
+    } catch (toggleError) {
+      setError(toggleError instanceof Error ? toggleError.message : text.errors.openDirectoryFailed);
+    }
+  }
+
   async function handleGoBack() {
     if (!canGoBack) return;
     const nextIndex = remoteHistoryIndex - 1;
@@ -621,15 +637,7 @@ export default function App({ initialBackendUrl = 'http://localhost:5590' }: App
           isLoading={isRemoteLoading}
           error={error}
           onTreeSelect={handleSshDirectoryOpen}
-          onTreeToggle={(path) => {
-            setExpandedRemotePaths((current) => {
-              const next = new Set(current);
-              if (next.has(path)) next.delete(path);
-              else next.add(path);
-              return next;
-            });
-            if (!remoteTreeChildren[path]) handleSshDirectoryOpen(path);
-          }}
+          onTreeToggle={handleTreeToggle}
           onNavigate={handleSshDirectoryOpen}
           onGoBack={handleGoBack}
           onGoForward={handleGoForward}
