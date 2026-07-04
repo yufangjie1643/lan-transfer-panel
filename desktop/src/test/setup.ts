@@ -49,6 +49,15 @@ vi.mock('@tauri-apps/api/core', () => ({
     if (command === 'select_download_directory') {
       return Promise.resolve('D:\\download');
     }
+    if (command === 'select_upload_files') {
+      return Promise.resolve(null);
+    }
+    if (command === 'upload_ssh_file') {
+      return Promise.resolve();
+    }
+    if (command === 'upload_ssh_entries') {
+      return Promise.resolve([]);
+    }
     if (command === 'download_ssh_file') {
       return Promise.resolve('D:\\download');
     }

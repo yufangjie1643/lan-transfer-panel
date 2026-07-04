@@ -2,6 +2,7 @@ import { invoke } from '@tauri-apps/api/core';
 import type { RemoteItem } from '../../api/types';
 import type { DownloadTasksResponse } from '../../api/types';
 import type { ConnectionProfile } from '../auth/connectionProfiles';
+import type { UploadEntry } from '../local/localFs';
 
 export interface SshDirectoryListing {
   path: string;
@@ -65,4 +66,25 @@ export function startVirtualFileDrag(
   size?: number
 ) {
   return invoke<void>('start_virtual_file_drag', { name, remotePath, localPath, size });
+}
+
+export function selectUploadFiles() {
+  return invoke<string[] | null>('select_upload_files');
+}
+
+export function uploadSshFile(
+  profile: ConnectionProfile,
+  remoteDir: string,
+  localPath: string,
+  name: string
+) {
+  return invoke<void>('upload_ssh_file', { profile, remoteDir, localPath, name });
+}
+
+export function uploadSshEntries(
+  profile: ConnectionProfile,
+  remoteDir: string,
+  entries: UploadEntry[]
+) {
+  return invoke<string[]>('upload_ssh_entries', { profile, remoteDir, entries });
 }

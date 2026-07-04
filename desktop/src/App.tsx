@@ -12,7 +12,7 @@ import {
 } from './features/auth/connectionProfiles';
 import { LauncherScreen } from './features/auth/LauncherScreen';
 import { ServerFormScreen } from './features/auth/ServerFormScreen';
-import { selectDownloadDirectory } from './features/local/localFs';
+import { collectUploadEntries, selectDownloadDirectory } from './features/local/localFs';
 import type { FolderTreeNode } from './features/local/FolderTree';
 import { DirectoryCache } from './features/remote/directoryCache';
 import { ExplorerSettingsPanel } from './features/remote/ExplorerSettingsPanel';
@@ -21,9 +21,11 @@ import { RemoteExplorer } from './features/remote/RemoteExplorer';
 import {
   listSshDirectory,
   prepareSshVirtualFile,
+  selectUploadFiles,
   startSshDownloadTask,
   startVirtualFileDrag,
   testSshConnection,
+  uploadSshEntries,
   type SshDirectoryListing
 } from './features/remote/sshRemote';
 import { defaultLocale, messages, type Locale } from './i18n/messages';
@@ -654,6 +656,23 @@ export default function App({ initialBackendUrl = 'http://localhost:5590' }: App
     setError('删除功能暂不可用');
   }
 
+  async function handleUpload() {
+    if (!sshProfile) {
+      reportSshFilesPending();
+      return;
+    }
+    try {
+      setError(null);
+      const paths = await selectUploadFiles();
+      if (!paths || paths.length === 0) return;
+      const entries = await collectUploadEntries(paths);
+      await uploadSshEntries(sshProfile, remotePath, entries);
+      await handleSshDirectoryOpen(remotePath);
+    } catch (uploadError) {
+      setError(uploadError instanceof Error ? uploadError.message : '上传失败');
+    }
+  }
+
   const connectionText = sessionUsername
     ? text.connection.connectedAs(sessionUsername)
     : isConnecting
@@ -761,6 +780,7 @@ export default function App({ initialBackendUrl = 'http://localhost:5590' }: App
           onGoUp={handleGoParent}
           onRefresh={() => handleSshDirectoryOpen(remotePath)}
           onNewFolder={handleNewFolder}
+          onUploadSelected={handleUpload}
           onDownloadSelected={handleDownloadSelected}
           onDeleteSelected={handleDeleteSelected}
           onOpenQueue={handleOpenQueueWindow}

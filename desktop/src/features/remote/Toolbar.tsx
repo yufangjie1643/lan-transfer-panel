@@ -1,4 +1,4 @@
-import { ArrowLeft, ArrowRight, ArrowUp, FolderPlus, RefreshCcw, Trash2, Download, List } from 'lucide-react';
+import { ArrowLeft, ArrowRight, ArrowUp, FolderPlus, RefreshCcw, Trash2, Upload, Download, List } from 'lucide-react';
 
 export interface ExplorerToolbarLabels {
   back: string;
@@ -6,6 +6,7 @@ export interface ExplorerToolbarLabels {
   up: string;
   refresh: string;
   newFolder: string;
+  upload: string;
   download: string;
   delete: string;
   queue: string;
@@ -23,6 +24,7 @@ interface ToolbarProps {
   onUp: () => void;
   onRefresh: () => void;
   onNewFolder: () => void;
+  onUpload: () => void;
   onDownload: () => void;
   onDelete: () => void;
   onOpenQueue: () => void;
@@ -40,6 +42,7 @@ export function Toolbar({
   onUp,
   onRefresh,
   onNewFolder,
+  onUpload,
   onDownload,
   onDelete,
   onOpenQueue
@@ -64,6 +67,10 @@ export function Toolbar({
         <button type="button" aria-label={labels.newFolder} title={labels.newFolder} onClick={onNewFolder}>
           <FolderPlus size={16} />
           <span>{labels.newFolder}</span>
+        </button>
+        <button type="button" aria-label={labels.upload} title={labels.upload} onClick={onUpload}>
+          <Upload size={16} />
+          <span>{labels.upload}</span>
         </button>
         <button type="button" aria-label={labels.download} title={labels.download} disabled={!hasSelection} onClick={onDownload}>
           <Download size={16} />

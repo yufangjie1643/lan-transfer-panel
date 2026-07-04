@@ -123,6 +123,7 @@ interface Messages {
       up: string;
       refresh: string;
       newFolder: string;
+      upload: string;
       download: string;
       delete: string;
       queue: string;
@@ -291,6 +292,7 @@ export const messages: Record<Locale, Messages> = {
         up: '上一级',
         refresh: '刷新',
         newFolder: '新建文件夹',
+        upload: '上传',
         download: '下载',
         delete: '删除',
         queue: '队列'
@@ -455,6 +457,7 @@ export const messages: Record<Locale, Messages> = {
         up: 'Up one level',
         refresh: 'Refresh',
         newFolder: 'New folder',
+        upload: 'Upload',
         download: 'Download',
         delete: 'Delete',
         queue: 'Queue'

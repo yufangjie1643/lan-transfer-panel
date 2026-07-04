@@ -101,7 +101,7 @@ struct TransferTask {
     error_message: Option<String>,
 }
 
-#[derive(Serialize)]
+#[derive(Deserialize, Serialize)]
 #[serde(rename_all = "camelCase")]
 struct UploadEntry {
     source_path: String,
@@ -484,6 +484,79 @@ fn collect_upload_entry(
 }
 
 #[tauri::command]
+async fn select_upload_files() -> Option<Vec<String>> {
+    rfd::AsyncFileDialog::new()
+        .pick_files()
+        .await
+        .map(|files| files.into_iter().map(|file| file.path().to_string_lossy().to_string()).collect())
+}
+
+async fn sftp_copy_from_local(
+    profile: &ConnectionProfile,
+    local_path: &std::path::Path,
+    remote_path: &str,
+) -> Result<(), String> {
+    let conn = sftp::connect(&sftp_profile(profile)).await?;
+    let guard = conn.lock().await;
+    let mut local = tokio::fs::File::open(local_path)
+        .await
+        .map_err(|e| format!("打开本地文件失败: {}", e))?;
+    let mut remote = guard
+        .sftp
+        .create(remote_path)
+        .await
+        .map_err(|e| format!("创建远程文件失败: {}", e))?;
+    tokio::io::copy(&mut local, &mut remote)
+        .await
+        .map_err(|e| format!("上传文件失败: {}", e))?;
+    Ok(())
+}
+
+#[tauri::command]
+async fn upload_ssh_file(
+    profile: ConnectionProfile,
+    remote_dir: String,
+    local_path: String,
+    name: String,
+) -> Result<(), String> {
+    let remote_path = if remote_dir.ends_with('/') {
+        format!("{}{}", remote_dir, name)
+    } else {
+        format!("{}/{}", remote_dir, name)
+    };
+    sftp_copy_from_local(&profile, std::path::Path::new(&local_path), &remote_path).await
+}
+
+#[tauri::command]
+async fn upload_ssh_entries(
+    profile: ConnectionProfile,
+    remote_dir: String,
+    entries: Vec<UploadEntry>,
+) -> Result<Vec<String>, String> {
+    let mut uploaded = Vec::new();
+    for entry in entries {
+        let remote_path = if remote_dir.ends_with('/') {
+            format!("{}{}", remote_dir, entry.relative_path)
+        } else {
+            format!("{}/{}", remote_dir, entry.relative_path)
+        };
+        if entry.is_dir {
+            let conn = sftp::connect(&sftp_profile(&profile)).await?;
+            let guard = conn.lock().await;
+            guard
+                .sftp
+                .create_dir(&remote_path)
+                .await
+                .map_err(|e| format!("创建远程目录失败: {}", e))?;
+        } else {
+            sftp_copy_from_local(&profile, std::path::Path::new(&entry.source_path), &remote_path).await?;
+        }
+        uploaded.push(remote_path);
+    }
+    Ok(uploaded)
+}
+
+#[tauri::command]
 fn select_download_directory() -> Option<String> {
     rfd::FileDialog::new()
         .pick_folder()
@@ -765,6 +838,9 @@ fn main() {
             list_local_roots,
             list_local_directory,
             collect_upload_entries,
+            select_upload_files,
+            upload_ssh_file,
+            upload_ssh_entries,
             select_download_directory,
             download_ssh_file,
             download_ssh_folder,

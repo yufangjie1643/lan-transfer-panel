@@ -56,6 +56,7 @@ const defaultProps = {
   onGoUp: vi.fn(),
   onRefresh: vi.fn(),
   onNewFolder: vi.fn(),
+  onUploadSelected: vi.fn(),
   onDownloadSelected: vi.fn(),
   onDeleteSelected: vi.fn(),
   onOpenQueue: vi.fn(),

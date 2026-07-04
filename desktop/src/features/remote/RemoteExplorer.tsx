@@ -41,6 +41,7 @@ interface RemoteExplorerProps {
   onGoUp: () => void;
   onRefresh: () => void;
   onNewFolder: () => void;
+  onUploadSelected: () => void;
   onDownloadSelected: () => void;
   onDeleteSelected: () => void;
   onOpenQueue: () => void;
@@ -72,6 +73,7 @@ export function RemoteExplorer({
   onGoUp,
   onRefresh,
   onNewFolder,
+  onUploadSelected,
   onDownloadSelected,
   onDeleteSelected,
   onOpenQueue,
@@ -126,6 +128,7 @@ export function RemoteExplorer({
         onUp={onGoUp}
         onRefresh={onRefresh}
         onNewFolder={onNewFolder}
+        onUpload={onUploadSelected}
         onDownload={onDownloadSelected}
         onDelete={onDeleteSelected}
         onOpenQueue={onOpenQueue}
