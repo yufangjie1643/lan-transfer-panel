@@ -21,8 +21,8 @@ describe('useAppStore', () => {
   it('sets remote items without clearing selection', () => {
     const { result } = renderHook(() => useAppStore());
     const items = [
-      { name: 'folder', isDir: true, size: 0, modified: '2024-01-01' },
-      { name: 'file.txt', isDir: false, size: 1024, modified: '2024-01-02' }
+      { Path: '/home/folder', Name: 'folder', IsDir: true, Size: 0, ModTime: '2024-01-01' },
+      { Path: '/home/file.txt', Name: 'file.txt', IsDir: false, Size: 1024, ModTime: '2024-01-02' }
     ];
 
     act(() => {
