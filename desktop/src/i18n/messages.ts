@@ -287,7 +287,7 @@ export const messages: Record<Locale, Messages> = {
       },
       fileList: {
         name: '名称',
-        modified: '修改时间',
+        modified: '修改日期',
         type: '类型',
         size: '大小',
         empty: '此文件夹为空',
