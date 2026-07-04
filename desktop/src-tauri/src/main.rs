@@ -3,9 +3,6 @@
 use serde::{Deserialize, Serialize};
 use std::fs;
 use std::path::{Path, PathBuf};
-use std::process::Command;
-#[cfg(windows)]
-use std::os::windows::process::CommandExt;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Mutex, OnceLock};
 use std::time::{Duration, UNIX_EPOCH};
@@ -504,77 +501,8 @@ fn select_download_directory() -> Option<String> {
         .map(|path| path.to_string_lossy().to_string())
 }
 
-fn run_scp_download(
-    profile: ConnectionProfile,
-    remote_path: String,
-    local_dir: String,
-    recursive: bool,
-) -> Result<String, String> {
-    run_scp_download_to_target(profile, remote_path, local_dir, recursive)
-}
-
-fn run_scp_download_to_target(
-    profile: ConnectionProfile,
-    remote_path: String,
-    local_target: String,
-    recursive: bool,
-) -> Result<String, String> {
-    if profile.auth_method != "key" {
-        return Err("当前桌面端文件夹下载先支持 SSH 密钥认证。".to_string());
-    }
-    let host = profile.host.trim();
-    let username = profile.username.trim();
-    if host.is_empty() || username.is_empty() || remote_path.trim().is_empty() {
-        return Err("缺少 SSH 主机、用户名或远程文件路径".to_string());
-    }
-
-    let control_dir = std::env::temp_dir().join("lan-transfer-ssh-control");
-    let _ = fs::create_dir_all(&control_dir);
-    let control_path = control_dir.join("%r@%h:%p");
-
-    let mut command = Command::new("scp");
-    if recursive {
-        command.arg("-r");
-    }
-    command
-        .arg("-P")
-        .arg(profile.port.to_string())
-        .arg("-o")
-        .arg("BatchMode=yes")
-        .arg("-o")
-        .arg("ConnectTimeout=8")
-        .arg("-o")
-        .arg("ControlMaster=auto")
-        .arg("-o")
-        .arg(format!("ControlPath={}", control_path.to_string_lossy()))
-        .arg("-o")
-        .arg("ControlPersist=60");
-
-    if let Some(identity) = profile.private_key_path.as_ref().filter(|value| !value.trim().is_empty()) {
-        command.arg("-i").arg(identity);
-    }
-
-    command
-        .arg(format!("{}@{}:{}", username, host, remote_path))
-        .arg(&local_target);
-
-    #[cfg(windows)]
-    command.creation_flags(0x08000000);
-
-    let output = command.output().map_err(|err| format!("启动 scp 失败: {}", err))?;
-    if !output.status.success() {
-        let detail = String::from_utf8_lossy(&output.stderr).trim().to_string();
-        return Err(if detail.is_empty() {
-            format!("SCP 下载失败，退出码 {:?}", output.status.code())
-        } else {
-            detail
-        });
-    }
-    Ok(local_target)
-}
-
 #[tauri::command]
-fn start_ssh_download_task(
+async fn start_ssh_download_task(
     profile: ConnectionProfile,
     remote_path: String,
     local_dir: String,
@@ -582,9 +510,6 @@ fn start_ssh_download_task(
     name: String,
     size: Option<u64>,
 ) -> Result<String, String> {
-    if profile.auth_method != "key" {
-        return Err("当前桌面端文件夹下载先支持 SSH 密钥认证。".to_string());
-    }
     let id = TRANSFER_COUNTER.fetch_add(1, Ordering::Relaxed);
     let gid = format!("ssh-{}-{}", id, safe_task_name(&name));
     let task = TransferTask {
@@ -597,8 +522,17 @@ fn start_ssh_download_task(
     };
     queue().lock().map_err(|err| err.to_string())?.push(task);
     let task_gid = gid.clone();
-    std::thread::spawn(move || {
-        let result = run_scp_download(profile, remote_path, local_dir, recursive);
+    tokio::spawn(async move {
+        let result = if recursive {
+            sftp_download_folder_recursive(&profile, &remote_path, Path::new(&local_dir)).await
+        } else {
+            let file_name = Path::new(&remote_path)
+                .file_name()
+                .map(|s| s.to_string_lossy().to_string())
+                .unwrap_or_else(|| "download".to_string());
+            let local_path = Path::new(&local_dir).join(safe_local_file_name(&file_name));
+            sftp_copy_to_local(&profile, &remote_path, &local_path).await
+        };
         if let Ok(mut tasks) = queue().lock() {
             if let Some(task) = tasks.iter_mut().find(|task| task.gid == task_gid) {
                 match result {
@@ -689,6 +623,71 @@ async fn sftp_copy_to_local(
     Ok(())
 }
 
+async fn sftp_download_folder_recursive(
+    profile: &ConnectionProfile,
+    remote_path: &str,
+    local_dir: &Path,
+) -> Result<(), String> {
+    let conn = sftp::connect(profile).await?;
+
+    let folder_name = Path::new(remote_path)
+        .file_name()
+        .map(|s| s.to_string_lossy().to_string())
+        .unwrap_or_else(|| "download".to_string());
+    let safe_name = safe_local_file_name(&folder_name);
+    let target_dir = local_dir.join(&safe_name);
+    tokio::fs::create_dir_all(&target_dir)
+        .await
+        .map_err(|e| format!("创建本地目录失败: {}", e))?;
+
+    sftp_download_recursive_inner(&conn, remote_path, &target_dir).await
+}
+
+async fn sftp_download_recursive_inner(
+    conn: &std::sync::Arc<tokio::sync::Mutex<sftp::SftpConnection>>,
+    remote_dir: &str,
+    local_dir: &Path,
+) -> Result<(), String> {
+    let guard = conn.lock().await;
+    let entries = guard
+        .sftp
+        .read_dir(remote_dir)
+        .await
+        .map_err(|e| format!("读取远程目录 {} 失败: {}", remote_dir, e))?;
+    drop(guard);
+
+    for entry in entries {
+        let name = entry.file_name();
+        if name == "." || name == ".." {
+            continue;
+        }
+        let remote_child = format!("{}/{}", remote_dir, name);
+        let safe_name = safe_local_file_name(&name);
+        let local_child = local_dir.join(&safe_name);
+
+        if entry.metadata().is_dir() {
+            tokio::fs::create_dir_all(&local_child)
+                .await
+                .map_err(|e| format!("创建本地目录失败: {}", e))?;
+            Box::pin(sftp_download_recursive_inner(conn, &remote_child, &local_child)).await?;
+        } else {
+            let guard = conn.lock().await;
+            let mut remote_file = guard
+                .sftp
+                .open(&remote_child)
+                .await
+                .map_err(|e| format!("打开远程文件 {} 失败: {}", remote_child, e))?;
+            let mut local_file = tokio::fs::File::create(&local_child)
+                .await
+                .map_err(|e| format!("创建本地文件 {} 失败: {}", local_child.display(), e))?;
+            tokio::io::copy(&mut remote_file, &mut local_file)
+                .await
+                .map_err(|e| format!("下载文件 {} 失败: {}", remote_child, e))?;
+        }
+    }
+    Ok(())
+}
+
 #[tauri::command]
 async fn download_ssh_file(
     profile: ConnectionProfile,
@@ -705,8 +704,13 @@ async fn download_ssh_file(
 }
 
 #[tauri::command]
-fn download_ssh_folder(profile: ConnectionProfile, remote_path: String, local_dir: String) -> Result<String, String> {
-    run_scp_download(profile, remote_path, local_dir, true)
+async fn download_ssh_folder(profile: ConnectionProfile, remote_path: String, local_dir: String) -> Result<String, String> {
+    sftp_download_folder_recursive(&profile, &remote_path, Path::new(&local_dir)).await?;
+    let folder_name = Path::new(&remote_path)
+        .file_name()
+        .map(|s| s.to_string_lossy().to_string())
+        .unwrap_or_else(|| "download".to_string());
+    Ok(Path::new(&local_dir).join(safe_local_file_name(&folder_name)).to_string_lossy().to_string())
 }
 
 #[tauri::command]

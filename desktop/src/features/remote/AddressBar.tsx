@@ -62,7 +62,11 @@ export function AddressBar({ labels, remoteName, path, onNavigate }: AddressBarP
   }
 
   return (
-    <div className="explorer-address-bar" data-testid="address-bar">
+    <div
+      className="explorer-address-bar"
+      data-testid="address-bar"
+      onDoubleClick={() => setIsEditing(true)}
+    >
       {segments.map((segment, index) => (
         <span key={segmentPaths[index]} className="address-segment">
           {index > 0 ? <span className="address-separator">›</span> : null}
